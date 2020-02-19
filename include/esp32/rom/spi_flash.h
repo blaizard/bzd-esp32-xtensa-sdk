@@ -20,7 +20,11 @@
 
 #include "esp_attr.h"
 
+#include "sdkconfig.h"
+
+#ifdef CONFIG_LEGACY_INCLUDE_COMMON_HEADERS
 #include "soc/spi_reg.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -110,13 +114,18 @@ extern "C" {
 #define ESP_ROM_SPIFLASH_BUFF_BYTE_READ_BITS  0x3f
 
 //SPI status register
-#define  ESP_ROM_SPIFLASH_BUSY_FLAG           BIT0
-#define  ESP_ROM_SPIFLASH_WRENABLE_FLAG       BIT1
-#define  ESP_ROM_SPIFLASH_BP0                 BIT2
-#define  ESP_ROM_SPIFLASH_BP1                 BIT3
-#define  ESP_ROM_SPIFLASH_BP2                 BIT4
-#define  ESP_ROM_SPIFLASH_WR_PROTECT          (ESP_ROM_SPIFLASH_BP0|ESP_ROM_SPIFLASH_BP1|ESP_ROM_SPIFLASH_BP2)
-#define  ESP_ROM_SPIFLASH_QE                  BIT9
+#define ESP_ROM_SPIFLASH_BUSY_FLAG            BIT0
+#define ESP_ROM_SPIFLASH_WRENABLE_FLAG        BIT1
+#define ESP_ROM_SPIFLASH_BP0                  BIT2
+#define ESP_ROM_SPIFLASH_BP1                  BIT3
+#define ESP_ROM_SPIFLASH_BP2                  BIT4
+#define ESP_ROM_SPIFLASH_WR_PROTECT           (ESP_ROM_SPIFLASH_BP0|ESP_ROM_SPIFLASH_BP1|ESP_ROM_SPIFLASH_BP2)
+#define ESP_ROM_SPIFLASH_QE                   BIT9
+
+//Extra dummy for flash read
+#define ESP_ROM_SPIFLASH_DUMMY_LEN_PLUS_20M   0
+#define ESP_ROM_SPIFLASH_DUMMY_LEN_PLUS_40M   1
+#define ESP_ROM_SPIFLASH_DUMMY_LEN_PLUS_80M   2
 
 #define FLASH_ID_GD25LQ32C  0xC86016
 
@@ -360,7 +369,7 @@ esp_rom_spiflash_result_t esp_rom_spiflash_lock(void);
   *         ESP_ROM_SPIFLASH_RESULT_ERR : Update error.
   *         ESP_ROM_SPIFLASH_RESULT_TIMEOUT : Update timeout.
   */
-esp_rom_spiflash_result_t esp_rom_spiflash_config_param(uint32_t deviceId, uint32_t chip_size, uint32_t block_size, 
+esp_rom_spiflash_result_t esp_rom_spiflash_config_param(uint32_t deviceId, uint32_t chip_size, uint32_t block_size,
                                                         uint32_t sector_size, uint32_t page_size, uint32_t status_mask);
 
 /**

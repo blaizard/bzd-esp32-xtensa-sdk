@@ -3,7 +3,7 @@
 
   It is not recommended to use these functions directly.  If using
   them from esp-idf then use the esp_sha_lock_engine() and
-  esp_sha_lock_memory_block() functions in hwcrypto/sha.h to ensure
+  esp_sha_lock_memory_block() functions in esp32/sha.h to ensure
   exclusive access.
  */
 // Copyright 2015-2016 Espressif Systems (Shanghai) PTE LTD
@@ -44,6 +44,9 @@ enum SHA_TYPE {
     SHA_INVALID = -1,
 };
 
+/* Do not use these function in multi core mode due to 
+ * inside they have no safe implementation (without DPORT workaround).
+*/
 void ets_sha_init(SHA_CTX *ctx);
 
 void ets_sha_enable(void);

@@ -17,8 +17,17 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
+#include "sdkconfig.h"
+
+#ifdef CONFIG_LEGACY_INCLUDE_COMMON_HEADERS
 #include "soc/soc.h"
+#endif
+
+#ifndef CONFIG_IDF_TARGET_ESP32
+#error "This header should only be included when building for ESP32"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -268,7 +277,7 @@ void ets_install_uart_printf(void);
         ets_printf("%s %u \n", __FILE__, __LINE__); \
         while (1) {};   \
     }                   \
-} while (0);
+} while (0)
 
 /**
   * @}

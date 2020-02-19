@@ -19,7 +19,7 @@
 #include "esp_attr.h"
 #include "ets_sys.h"
 #include "soc/soc.h"
-#include "soc/uart_reg.h"
+#include "soc/uart_periph.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,7 +36,7 @@ extern "C" {
 #define RX_BUFF_SIZE                     0x100
 #define TX_BUFF_SIZE                     100
 
-//uart int enalbe register ctrl bits
+//uart int enable register ctrl bits
 #define UART_RCV_INTEN                   BIT0
 #define UART_TRX_INTEN                   BIT1
 #define UART_LINE_STATUS_INTEN           BIT2
@@ -301,14 +301,14 @@ char uart_rx_one_char_block(void);
   *
   * @param  uint8_t *pString : the pointer to store the string.
   *
-  * @param  uint8_t MaxStrlen : the max string length, incude '\0'.
+  * @param  uint8_t MaxStrlen : the max string length, include '\0'.
   *
   * @return OK.
   */
 STATUS UartRxString(uint8_t *pString, uint8_t MaxStrlen);
 
 /**
-  * @brief Process uart recevied information in the interrupt handler.
+  * @brief Process uart received information in the interrupt handler.
   *        Please do not call this function in SDK.
   *
   * @param  void *para : the message receive buffer.
