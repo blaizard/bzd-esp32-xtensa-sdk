@@ -231,7 +231,7 @@
 
 #define LWIP_DHCP_IP_ADDR_RESTORE()     dhcp_ip_addr_restore(netif)
 #define LWIP_DHCP_IP_ADDR_STORE()       dhcp_ip_addr_store(netif)
-#define LWIP_DHCP_IP_ADDR_ERASE(esp_netif)       dhcp_ip_addr_erase(esp_netif)
+#define LWIP_DHCP_IP_ADDR_ERASE()       dhcp_ip_addr_erase(esp_netif[tcpip_if])
 
 #endif
 
@@ -312,11 +312,6 @@
 #define TCP_QUEUE_OOSEQ                 CONFIG_LWIP_TCP_QUEUE_OOSEQ
 
 /**
- * LWIP_TCP_SACK_OUT==1: TCP will support sending selective acknowledgements (SACKs).
- */
-#define LWIP_TCP_SACK_OUT               CONFIG_LWIP_TCP_SACK_OUT
-
-/**
  * ESP_TCP_KEEP_CONNECTION_WHEN_IP_CHANGES==1: Keep TCP connection when IP changed
  * scenario happens: 192.168.0.2 -> 0.0.0.0 -> 192.168.0.2 or 192.168.0.2 -> 0.0.0.0
  */
@@ -329,11 +324,6 @@
  *         for the event. This is the default.
 */
 #define TCP_MSS                         CONFIG_LWIP_TCP_MSS
-
-/**
- * TCP_TMR_INTERVAL: TCP timer interval
- */
-#define TCP_TMR_INTERVAL                CONFIG_LWIP_TCP_TMR_INTERVAL
 
 /**
  * TCP_MSL: The maximum segment lifetime in milliseconds
@@ -559,24 +549,12 @@
  */
 #define SO_REUSE                        CONFIG_LWIP_SO_REUSE
 
-
-/**
- * LWIP_DNS_SUPPORT_MDNS_QUERIES==1: Enable mDNS queries in hostname resolution.
- * This option is set via menuconfig.
- */
-#define LWIP_DNS_SUPPORT_MDNS_QUERIES   CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES
 /**
  * SO_REUSE_RXTOALL==1: Pass a copy of incoming broadcast/multicast packets
  * to all local matches if SO_REUSEADDR is turned on.
  * WARNING: Adds a memcpy for every packet if passing to more than one pcb!
  */
 #define SO_REUSE_RXTOALL                CONFIG_LWIP_SO_REUSE_RXTOALL
-
-/**
- * LWIP_NETBUF_RECVINFO==1: Enable IP_PKTINFO option.
- * This option is set via menuconfig.
- */
-#define LWIP_NETBUF_RECVINFO            CONFIG_LWIP_NETBUF_RECVINFO
 
 /*
    ----------------------------------------
@@ -849,10 +827,7 @@
  */
 #define SNTP_SERVER_DNS            1
 
-// It disables a check of SNTP_UPDATE_DELAY it is done in sntp_set_sync_interval
-#define SNTP_SUPPRESS_DELAY_CHECK
-
-#define SNTP_UPDATE_DELAY              (sntp_get_sync_interval())
+#define SNTP_UPDATE_DELAY              CONFIG_LWIP_SNTP_UPDATE_DELAY
 
 #define SNTP_SET_SYSTEM_TIME_US(sec, us)  \
     do { \

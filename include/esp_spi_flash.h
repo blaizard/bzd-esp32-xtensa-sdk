@@ -32,24 +32,6 @@ extern "C" {
 
 #define SPI_FLASH_MMU_PAGE_SIZE 0x10000 /**< Flash cache MMU mapping page size */
 
-typedef enum {
-    FLASH_WRAP_MODE_8B = 0,
-    FLASH_WRAP_MODE_16B = 2,
-    FLASH_WRAP_MODE_32B = 4,
-    FLASH_WRAP_MODE_64B = 6,
-    FLASH_WRAP_MODE_DISABLE = 1
-} spi_flash_wrap_mode_t;
-
-/**
- * @brief set wrap mode of flash
- *
- * @param mode: wrap mode support disable, 16 32, 64 byte
- *
- * @return esp_err_t : ESP_OK for successful.
- *
- */
-esp_err_t spi_flash_wrap_set(spi_flash_wrap_mode_t mode);
-
 /**
  * @brief  Initialize SPI flash access driver
  *
@@ -59,7 +41,7 @@ esp_err_t spi_flash_wrap_set(spi_flash_wrap_mode_t mode);
  *  no need to call it from application code.
  *
  */
-void spi_flash_init(void);
+void spi_flash_init();
 
 /**
  * @brief  Get flash chip size, as set in binary image header
@@ -68,12 +50,12 @@ void spi_flash_init(void);
  *
  * @return size of flash chip, in bytes
  */
-size_t spi_flash_get_chip_size(void);
+size_t spi_flash_get_chip_size();
 
 /**
  * @brief  Erase the Flash sector.
  *
- * @param  sector: Sector number, the count starts at sector 0, 4KB per sector.
+ * @param  sector  Sector number, the count starts at sector 0, 4KB per sector.
  *
  * @return esp_err_t
  */
@@ -256,7 +238,7 @@ void spi_flash_munmap(spi_flash_mmap_handle_t handle);
  * of pages allocated to each handle. It also lists all non-zero entries of
  * MMU table and corresponding reference counts.
  */
-void spi_flash_mmap_dump(void);
+void spi_flash_mmap_dump();
 
 /**
  * @brief get free pages number which can be mmap
@@ -311,14 +293,7 @@ const void *spi_flash_phys2cache(size_t phys_offs, spi_flash_mmap_memory_t memor
  *
  * @return true if both CPUs have flash cache enabled, false otherwise.
  */
-bool spi_flash_cache_enabled(void);
-
-/**
- * @brief Re-enable cache for the core defined as cpuid parameter.
- *
- * @param cpuid the core number to enable instruction cache for
- */
-void spi_flash_enable_cache(uint32_t cpuid);
+bool spi_flash_cache_enabled();
 
 /**
  * @brief SPI flash critical section enter function.
@@ -399,7 +374,7 @@ void spi_flash_guard_set(const spi_flash_guard_funcs_t* funcs);
  * @return The guard functions that were set via spi_flash_guard_set(). These functions
  * can be called if implementing custom low-level SPI flash operations.
  */
-const spi_flash_guard_funcs_t *spi_flash_guard_get(void);
+const spi_flash_guard_funcs_t *spi_flash_guard_get();
 
 /**
  * @brief Default OS-aware flash access guard functions
@@ -434,12 +409,12 @@ typedef struct {
 /**
  * @brief  Reset SPI flash operation counters
  */
-void spi_flash_reset_counters(void);
+void spi_flash_reset_counters();
 
 /**
  * @brief  Print SPI flash operation counters
  */
-void spi_flash_dump_counters(void);
+void spi_flash_dump_counters();
 
 /**
  * @brief  Return current SPI flash operation counters
@@ -447,7 +422,7 @@ void spi_flash_dump_counters(void);
  * @return  pointer to the spi_flash_counters_t structure holding values
  *          of the operation counters
  */
-const spi_flash_counters_t* spi_flash_get_counters(void);
+const spi_flash_counters_t* spi_flash_get_counters();
 
 #endif //CONFIG_SPI_FLASH_ENABLE_COUNTERS
 

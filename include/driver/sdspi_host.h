@@ -20,6 +20,7 @@
 #include "sdmmc_types.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "driver/sdmmc_host.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -90,7 +91,7 @@ typedef struct {
  *      - ESP_OK on success
  *      - other error codes may be returned in future versions
  */
-esp_err_t sdspi_host_init(void);
+esp_err_t sdspi_host_init();
 
 /**
 * @brief Initialize SD SPI driver for the specific SPI controller
@@ -158,7 +159,7 @@ esp_err_t sdspi_host_set_card_clk(int slot, uint32_t freq_khz);
  *      - ESP_OK on success
  *      - ESP_ERR_INVALID_STATE if sdspi_host_init function has not been called
  */
-esp_err_t sdspi_host_deinit(void);
+esp_err_t sdspi_host_deinit();
 
 /**
  * @brief Enable SDIO interrupt.

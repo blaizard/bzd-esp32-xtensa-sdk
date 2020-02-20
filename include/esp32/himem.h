@@ -125,14 +125,14 @@ esp_err_t esp_himem_unmap(esp_himem_rangehandle_t range, void *ptr, size_t len);
  *
  * @returns Amount of memory, in bytes
  */
-size_t esp_himem_get_phys_size(void);
+size_t esp_himem_get_phys_size();
 
 /**
  * @brief Get free amount of memory under control of himem API
  *
  * @returns Amount of free memory, in bytes
  */
-size_t esp_himem_get_free_size(void);
+size_t esp_himem_get_free_size();
 
 
 /**
@@ -143,7 +143,7 @@ size_t esp_himem_get_free_size(void);
  *
  * @returns Amount of reserved area, in bytes
  */
-size_t esp_himem_reserved_area_size(void);
+size_t esp_himem_reserved_area_size();
 
 
 #ifdef __cplusplus

@@ -138,7 +138,7 @@ size_t soc_get_available_memory_regions(soc_memory_region_t *regions);
  * returned by soc_get_available_memory_regions(). Used to size the
  * array passed to that function.
  */
-size_t soc_get_available_memory_region_max_count(void);
+size_t soc_get_available_memory_region_max_count();
 
 inline static bool IRAM_ATTR esp_ptr_dma_capable(const void *p)
 {
@@ -155,24 +155,15 @@ inline static bool IRAM_ATTR esp_ptr_executable(const void *p)
     intptr_t ip = (intptr_t) p;
     return (ip >= SOC_IROM_LOW && ip < SOC_IROM_HIGH)
         || (ip >= SOC_IRAM_LOW && ip < SOC_IRAM_HIGH)
-        || (ip >= SOC_IROM_MASK_LOW && ip < SOC_IROM_MASK_HIGH)
-#if defined(SOC_CACHE_APP_LOW) && defined(CONFIG_FREERTOS_UNICORE)
-        || (ip >= SOC_CACHE_APP_LOW && ip < SOC_CACHE_APP_HIGH)
-#endif
         || (ip >= SOC_RTC_IRAM_LOW && ip < SOC_RTC_IRAM_HIGH);
 }
 
 inline static bool IRAM_ATTR esp_ptr_byte_accessible(const void *p)
 {
-    intptr_t ip = (intptr_t) p;
     bool r;
-    r = (ip >= SOC_BYTE_ACCESSIBLE_LOW && ip < SOC_BYTE_ACCESSIBLE_HIGH);
-#if CONFIG_SPIRAM
-#if CONFIG_SPIRAM_SIZE != -1 // Fixed size, can be more accurate
-    r |= (ip >= SOC_EXTRAM_DATA_LOW && ip < (SOC_EXTRAM_DATA_LOW + CONFIG_SPIRAM_SIZE));
-#else
-    r |= (ip >= SOC_EXTRAM_DATA_LOW && ip < (SOC_EXTRAM_DATA_HIGH));
-#endif
+    r = ((intptr_t)p >= SOC_BYTE_ACCESSIBLE_LOW && (intptr_t)p < SOC_BYTE_ACCESSIBLE_HIGH);
+#if CONFIG_ESP32_SPIRAM_SUPPORT
+    r |= ((intptr_t)p >= SOC_EXTRAM_DATA_LOW && (intptr_t)p < SOC_EXTRAM_DATA_HIGH);
 #endif
     return r;
 }
@@ -190,7 +181,7 @@ inline static bool IRAM_ATTR esp_ptr_external_ram(const void *p) {
 }
 
 inline static bool IRAM_ATTR esp_ptr_in_iram(const void *p) {
-#if !CONFIG_FREERTOS_UNICORE || CONFIG_IDF_TARGET_ESP32S2BETA
+#ifndef CONFIG_FREERTOS_UNICORE
     return ((intptr_t)p >= SOC_IRAM_LOW && (intptr_t)p < SOC_IRAM_HIGH);
 #else
     return ((intptr_t)p >= SOC_CACHE_APP_LOW && (intptr_t)p < SOC_IRAM_HIGH);

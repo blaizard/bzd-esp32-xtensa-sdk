@@ -16,12 +16,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
-#include "sdkconfig.h"
-#if CONFIG_IDF_TARGET_ESP32
+
+// Include SoC-specific definitions. Only ESP32 supported for now.
 #include "esp32/pm.h"
-#elif CONFIG_IDF_TARGET_ESP32S2BETA
-#include "esp32s2beta/pm.h"
-#endif
 
 #ifdef __cplusplus
 extern "C" {

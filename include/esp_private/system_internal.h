@@ -20,8 +20,6 @@ extern "C" {
 
 #include "esp_system.h"
 
-#define TG0_WDT_TICK_US 500
-
 /**
  * @brief  Internal function to restart PRO and APP CPUs.
  *
@@ -31,7 +29,7 @@ extern "C" {
  * This is an internal function called by esp_restart. It is called directly
  * by the panic handler and brownout detector interrupt.
  */
-void esp_restart_noos(void) __attribute__ ((noreturn));
+void esp_restart_noos() __attribute__ ((noreturn));
 
 /**
  * @brief  Internal function to set reset reason hint

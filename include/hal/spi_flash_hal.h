@@ -204,7 +204,17 @@ void spi_flash_hal_poll_cmd_done(spi_flash_host_driver_t *driver);
  *
  * @return True if the buffer can be used to send data, otherwise false.
  */
-bool spi_flash_hal_supports_direct_write(spi_flash_host_driver_t *driver, const void *p);
+static inline bool spi_flash_hal_supports_direct_write(spi_flash_host_driver_t *driver, const void *p)
+{
+#ifdef ESP_PLATFORM
+    bool direct_write = ( ((spi_flash_memspi_data_t *)driver->driver_data)->spi != &SPI1
+                          || esp_ptr_in_dram(p) );
+#else
+    //If it is not on real chips, there is no limitation that the data has to be in DRAM.
+    bool direct_write = true;
+#endif
+    return direct_write;
+}
 
 /**
  * Check whether the given buffer can be used as the read buffer directly. If 'chip' is connected to the main SPI bus, we can only read directly from
@@ -215,4 +225,15 @@ bool spi_flash_hal_supports_direct_write(spi_flash_host_driver_t *driver, const 
  *
  * @return True if the buffer can be used to receive data, otherwise false.
  */
-bool spi_flash_hal_supports_direct_read(spi_flash_host_driver_t *driver, const void *p);
+static inline bool spi_flash_hal_supports_direct_read(spi_flash_host_driver_t *driver, const void *p)
+{
+#ifdef ESP_PLATFORM
+//currently the driver doesn't support to read through DMA, no word-aligned requirements
+    bool direct_read = ( ((spi_flash_memspi_data_t *)driver->driver_data)->spi != &SPI1
+                          || esp_ptr_in_dram(p) );
+#else
+    //If it is not on real chips, there is no limitation that the data has to be in DRAM.
+    bool direct_read = true;
+#endif
+    return direct_read;
+}

@@ -36,8 +36,6 @@
 /// Swap the bit order to its correct place to send
 #define HAL_SPI_SWAP_DATA_TX(data, len) HAL_SWAP32((uint32_t)data<<(32-len))
 
-#define SPI_LL_GET_HW(ID) ((ID)==0? &SPI1:((ID)==1? &SPI2 : &SPI3))
-
 /**
  * The data structure holding calculated clock configuration. Since the
  * calculation needs long time, it should be calculated during initialization and
@@ -53,12 +51,6 @@ typedef enum {
     SPI_LL_IO_MODE_QIO,         ///< 4-bit mode for address and data phases, 1-bit mode for command phase
     SPI_LL_IO_MODE_QUAD,        ///< 4-bit mode for data phases only, 1-bit mode for command and address phases
 } spi_ll_io_mode_t;
-
-/// Interrupt type for different working pattern
-typedef enum {
-    SPI_LL_INT_TYPE_NORMAL = 0, ///< Typical pattern, only wait for trans done
-} spi_ll_slave_intr_type;
-
 
 /*------------------------------------------------------------------------------
  * Control
@@ -267,10 +259,6 @@ static inline void spi_ll_enable_int(spi_dev_t *hw)
     hw->slave.trans_inten = 1;
 }
 
-static inline void spi_ll_slave_set_int_type(spi_dev_t *hw, spi_ll_slave_intr_type int_type)
-{
-    hw->slave.trans_inten = 1;
-}
 
 /*------------------------------------------------------------------------------
  * Configs: mode

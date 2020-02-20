@@ -17,6 +17,7 @@
 #include "esp_err.h"
 #include "driver/gpio.h"
 #include "driver/sdmmc_types.h"
+#include "driver/sdmmc_host.h"
 #include "driver/sdspi_host.h"
 #include "ff.h"
 #include "wear_levelling.h"
@@ -145,7 +146,7 @@ esp_err_t esp_vfs_fat_sdmmc_mount(const char* base_path,
  *      - ESP_OK on success
  *      - ESP_ERR_INVALID_STATE if esp_vfs_fat_sdmmc_mount hasn't been called
  */
-esp_err_t esp_vfs_fat_sdmmc_unmount(void);
+esp_err_t esp_vfs_fat_sdmmc_unmount();
 
 /**
  * @brief Convenience function to initialize FAT filesystem in SPI flash and register it in VFS

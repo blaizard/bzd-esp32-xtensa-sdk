@@ -34,14 +34,14 @@ typedef enum {
  *     - ESP_SPIRAM_SIZE_INVALID if SPI RAM not enabled or not valid
  *     - SPI RAM size
  */
-esp_spiram_size_t esp_spiram_get_chip_size(void);
+esp_spiram_size_t esp_spiram_get_chip_size();
 
 /**
  * @brief Initialize spiram interface/hardware. Normally called from cpu_start.c.
  *
  * @return ESP_OK on success
  */
-esp_err_t esp_spiram_init(void);
+esp_err_t esp_spiram_init();
 
 /**
  * @brief Configure Cache/MMU for access to external SPI RAM.
@@ -52,7 +52,7 @@ esp_err_t esp_spiram_init(void);
  *
  * @attention this function must be called with flash cache disabled.
  */
-void esp_spiram_init_cache(void);
+void esp_spiram_init_cache();
 
 
 /**
@@ -63,13 +63,13 @@ void esp_spiram_init_cache(void);
  *
  * @return true on success, false on failed memory test
  */
-bool esp_spiram_test(void);
+bool esp_spiram_test();
 
 
 /**
  * @brief Add the initialized SPI RAM to the heap allocator.
  */
-esp_err_t esp_spiram_add_to_heapalloc(void);
+esp_err_t esp_spiram_add_to_heapalloc();
 
 
 /**
@@ -77,7 +77,7 @@ esp_err_t esp_spiram_add_to_heapalloc(void);
  *
  * @return Size in bytes, or 0 if no external RAM chip support compiled in.
  */
-size_t esp_spiram_get_size(void);
+size_t esp_spiram_get_size();
 
 
 /**
@@ -87,7 +87,7 @@ size_t esp_spiram_get_size(void);
  *
  * This is meant for use from within the SPI flash code.
  */
-void esp_spiram_writeback_cache(void);
+void esp_spiram_writeback_cache();
 
 
 

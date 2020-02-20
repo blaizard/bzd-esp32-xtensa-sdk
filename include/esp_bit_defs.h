@@ -50,14 +50,8 @@
 //}}
 
 #ifndef __ASSEMBLER__
-#ifndef BIT
 #define BIT(nr)                 (1UL << (nr))
-#endif
-#ifndef BIT64
 #define BIT64(nr)               (1ULL << (nr))
-#endif
 #else
-#ifndef BIT
 #define BIT(nr)                 (1 << (nr))
-#endif
 #endif

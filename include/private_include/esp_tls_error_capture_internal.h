@@ -33,13 +33,11 @@ typedef enum {
     ERR_TYPE_MBEDTLS,
     ERR_TYPE_MBEDTLS_CERT_FLAGS,
     ERR_TYPE_ESP,
-    ERR_TYPE_WOLFSSL,
-    ERR_TYPE_WOLFSSL_CERT_FLAGS,
 } err_type_t;
 
 /**
  * Error tracker logging macro, this implementation saves latest errors of
- *  ERR_TYPE_ESP, ERR_TYPE_ESP_TLS and ERR_TYPE_ESP_TLS_CERT_FLAGS types
+ *  ERR_TYPE_ESP, ERR_TYPE_MBEDTLS and ERR_TYPE_MBEDTLS_CERT_FLAGS types
  */
 #define ESP_INT_EVENT_TRACKER_CAPTURE(h, type, code)    esp_int_event_tracker_capture(h, type, code)
 
@@ -49,18 +47,12 @@ static inline void esp_int_event_tracker_capture(esp_tls_error_handle_t h, uint3
         if (type == ERR_TYPE_ESP) {
             h->last_error = code;
         } else if (type == ERR_TYPE_MBEDTLS) {
-            h->esp_tls_error_code = code;
+            h->mbedtls_error_code = code;
         } else if (type == ERR_TYPE_MBEDTLS_CERT_FLAGS) {
-            h->esp_tls_flags = code;
-        } else if (type == ERR_TYPE_WOLFSSL) {
-            h->esp_tls_error_code = code;
-        } else if (type == ERR_TYPE_WOLFSSL_CERT_FLAGS) {
-            h->esp_tls_flags = code;
+            h->mbedtls_flags = code;
         }
     }
 }
-
-
 
 #ifdef __cplusplus
 }

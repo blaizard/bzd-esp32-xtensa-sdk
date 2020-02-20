@@ -31,7 +31,7 @@ extern "C" {
  *      - ESP_OK success
  *      - ESP_ERR_TIMEOUT reserved for future use. Currently the function will wait until success.
  */
-esp_err_t adc2_wifi_acquire(void);
+esp_err_t adc2_wifi_acquire();
 
 
 /**
@@ -42,7 +42,7 @@ esp_err_t adc2_wifi_acquire(void);
  *
  * @return always return ESP_OK.
  */
-esp_err_t adc2_wifi_release(void);
+esp_err_t adc2_wifi_release();
 
 #ifdef __cplusplus
 }

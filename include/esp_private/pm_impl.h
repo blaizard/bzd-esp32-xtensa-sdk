@@ -80,19 +80,19 @@ void esp_pm_impl_switch_mode(pm_mode_t mode, pm_mode_switch_t lock_or_unlock, pm
 /**
  * @brief Call once at startup to initialize pm implementation
  */
-void esp_pm_impl_init(void);
+void esp_pm_impl_init();
 
 /**
  * @brief Hook function for the idle task
  * Must be called from the IDLE task on each CPU before entering waiti state.
  */
-void esp_pm_impl_idle_hook(void);
+void esp_pm_impl_idle_hook();
 
 /**
  * @brief Hook function for the interrupt dispatcher
  * Must be called soon after entering the ISR
  */
-void esp_pm_impl_isr_hook(void);
+void esp_pm_impl_isr_hook();
 
 /**
  * @brief Dump the information about time spent in each of the pm modes.
@@ -107,14 +107,14 @@ void esp_pm_impl_dump_stats(FILE* out);
 /**
  * @brief Hook function implementing `waiti` instruction, should be invoked from idle task context
  */
-void esp_pm_impl_waiti(void);
+void esp_pm_impl_waiti();
 
 #ifdef CONFIG_PM_PROFILING
 #define WITH_PROFILING
 #endif
 
 #ifdef WITH_PROFILING
-static inline pm_time_t IRAM_ATTR pm_get_time(void)
+static inline pm_time_t IRAM_ATTR pm_get_time()
 {
     return esp_timer_get_time();
 }

@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#include <esp_netif.h>
+#include <tcpip_adapter.h>
 #include "esp_event.h"
 
 #define MDNS_TYPE_A                 0x0001
@@ -52,16 +52,9 @@ typedef struct {
  * @brief   mDNS query linked list IP item
  */
 typedef struct mdns_ip_addr_s {
-    esp_ip_addr_t addr;                     /*!< IP address */
+    ip_addr_t addr;                         /*!< IP address */
     struct mdns_ip_addr_s * next;           /*!< next IP, or NULL for the last IP in the list */
 } mdns_ip_addr_t;
-
-typedef enum mdns_if_internal {
-    MDNS_IF_STA = 0,
-    MDNS_IF_AP = 1,
-    MDNS_IF_ETH = 2,
-    MDNS_IF_MAX
-} mdns_if_t;
 
 /**
  * @brief   mDNS query result structure
@@ -69,8 +62,7 @@ typedef enum mdns_if_internal {
 typedef struct mdns_result_s {
     struct mdns_result_s * next;            /*!< next result, or NULL for the last result in the list */
 
-    mdns_if_t tcpip_if;                     /*!< interface index */
-
+    tcpip_adapter_if_t tcpip_if;            /*!< interface on which the result came (AP/STA/ETH) */
     mdns_ip_protocol_t ip_protocol;         /*!< ip_protocol type of the interface (v4/v6) */
     // PTR
     char * instance_name;                   /*!< instance name */
@@ -81,7 +73,7 @@ typedef struct mdns_result_s {
     mdns_txt_item_t * txt;                  /*!< txt record */
     size_t txt_count;                       /*!< number of txt items */
     // A and AAAA
-    mdns_ip_addr_t * addr;                  /*!< linked list of IP addresses found */
+    mdns_ip_addr_t * addr;                  /*!< linked list of IP addreses found */
 } mdns_result_t;
 
 /**
@@ -93,13 +85,13 @@ typedef struct mdns_result_s {
  *     - ESP_ERR_NO_MEM on memory error
  *     - ESP_FAIL when failed to start mdns task
  */
-esp_err_t mdns_init(void);
+esp_err_t mdns_init();
 
 /**
  * @brief  Stop and free mDNS server
  *
  */
-void mdns_free(void);
+void mdns_free();
 
 /**
  * @brief  Set the hostname for mDNS server
@@ -141,7 +133,7 @@ esp_err_t mdns_instance_name_set(const char * instance_name);
  *     - ESP_OK success
  *     - ESP_ERR_INVALID_ARG Parameter error
  *     - ESP_ERR_NO_MEM memory error
- *     - ESP_FAIL failed to add service
+ *     - ESP_FAIL failed to add serivce
  */
 esp_err_t mdns_service_add(const char * instance_name, const char * service_type, const char * proto, uint16_t port, mdns_txt_item_t txt[], size_t num_items);
 
@@ -243,7 +235,7 @@ esp_err_t mdns_service_txt_item_remove(const char * service_type, const char * p
  *     - ESP_OK success
  *     - ESP_ERR_INVALID_ARG Parameter error
  */
-esp_err_t mdns_service_remove_all(void);
+esp_err_t mdns_service_remove_all();
 
 /**
  * @brief  Query mDNS for host or service
@@ -337,7 +329,7 @@ esp_err_t mdns_query_txt(const char * instance_name, const char * service_type, 
  *     - ESP_ERR_NO_MEM         memory error
  *     - ESP_ERR_INVALID_ARG    parameter error
  */
-esp_err_t mdns_query_a(const char * host_name, uint32_t timeout, esp_ip4_addr_t * addr);
+esp_err_t mdns_query_a(const char * host_name, uint32_t timeout, ip4_addr_t * addr);
 
 /**
  * @brief  Query mDNS for A record
@@ -352,7 +344,7 @@ esp_err_t mdns_query_a(const char * host_name, uint32_t timeout, esp_ip4_addr_t 
  *     - ESP_ERR_NO_MEM         memory error
  *     - ESP_ERR_INVALID_ARG    parameter error
  */
-esp_err_t mdns_query_aaaa(const char * host_name, uint32_t timeout, esp_ip6_addr_t * addr);
+esp_err_t mdns_query_aaaa(const char * host_name, uint32_t timeout, ip6_addr_t * addr);
 
 /**
  * @brief   System event handler
@@ -362,7 +354,7 @@ esp_err_t mdns_query_aaaa(const char * host_name, uint32_t timeout, esp_ip6_addr
  * @param  ctx          The system event context
  * @param  event        The system event
  */
-esp_err_t mdns_handle_system_event(void *ctx, system_event_t *event) __attribute__((deprecated));
+esp_err_t mdns_handle_system_event(void *ctx, system_event_t *event);
 
 #ifdef __cplusplus
 }

@@ -2,7 +2,7 @@
  * Xtensa Special Register symbolic names
  */
 
-/* $Id: //depot/rel/Foxhill/dot.9/Xtensa/OS/include/xtensa/specreg.h#1 $ */
+/* $Id: //depot/rel/Eaglenest/Xtensa/OS/include/xtensa/specreg.h#2 $ */
 
 /*
  * Copyright (c) 2005-2011 Tensilica Inc.
@@ -53,8 +53,7 @@
 #define DTLBCFG		92
 #define IBREAKENABLE	96
 #define MEMCTL		97
-#define CACHEATTR	98	/* until T1050, XEA1 */
-#define CACHEADRDIS	98	/* LX7+ */
+#define CACHEATTR	98
 #define ATOMCTL		99
 #define DDR		104
 #define MECR		110

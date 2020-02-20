@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-void start_tb_console(void);
+void start_tb_console();
 
 #ifdef __cplusplus
 }

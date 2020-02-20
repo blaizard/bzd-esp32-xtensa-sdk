@@ -25,7 +25,7 @@ extern "C" {
  *
  * @return None
  */
-void bootloader_flash_update_id(void);
+void bootloader_flash_update_id();
 
 /**
  * @brief Set the flash CS setup and hold time.
@@ -35,7 +35,7 @@ void bootloader_flash_update_id(void);
  *
  * @return None
  */
-void bootloader_flash_cs_timing_config(void);
+void bootloader_flash_cs_timing_config();
 
 /**
  * @brief Configure SPI flash clock.

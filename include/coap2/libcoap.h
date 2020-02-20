@@ -40,10 +40,14 @@ typedef USHORT in_port_t;
 #  endif
 #endif
 #ifndef COAP_DEPRECATED
-#  if defined(_MSC_VER)
-#    define COAP_DEPRECATED __declspec(deprecated)
-#  else
+#  if defined(__cplusplus)
 #    define COAP_DEPRECATED __attribute__ ((deprecated))
+#  else
+#    if defined(_MSC_VER)
+#      define COAP_DEPRECATED __declspec(deprecated)
+#    else
+#      define COAP_DEPRECATED __attribute__ ((deprecated))
+#    endif
 #  endif
 #endif
 
