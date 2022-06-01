@@ -1,16 +1,8 @@
-// Copyright 2017-2018 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * SPDX-FileCopyrightText: 2017-2022 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 /*
  *   Software Stack demonstrated:
@@ -68,14 +60,8 @@
  *
  *  In present implementation, applications are able to access mesh stack directly without having to go through LwIP stack.
  *  Applications use esp_mesh_send() and esp_mesh_recv() to send and receive messages over the mesh network.
- *  In mesh stack design, normal devices don't require LwIP stack. But since IDF hasn't supported system without initializing LwIP stack yet,
- *  applications still need to do LwIP initialization and two more things are required to be done
- *  (1) stop DHCP server on softAP interface by default
- *  (2) stop DHCP client on station interface by default.
- *  Examples:
- *  tcpip_adapter_init();
- *  tcpip_adapter_dhcps_stop(TCPIP_ADAPTER_IF_AP)；
- *  tcpip_adapter_dhcpc_stop(TCPIP_ADAPTER_IF_STA)；
+ *  In mesh stack design, normal devices don't require LwIP stack, but if any of these devices could be promoted to a root node in runtime,
+ *  (due to automatic or manual topology reconfiguration) the TCP/IP stack should be initialized (for the root code to access external IP network)
  *
  *  Over the mesh network, only the root is able to access external IP network.
  *  In application mesh event handler, once a device becomes a root, start DHCP client immediately whether DHCP is chosen.
@@ -88,6 +74,7 @@
 #include "esp_wifi.h"
 #include "esp_wifi_types.h"
 #include "esp_mesh_internal.h"
+#include "lwip/ip_addr.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -124,6 +111,10 @@ extern "C" {
 #define ESP_ERR_MESH_DISCARD_DUPLICATE    (ESP_ERR_MESH_BASE + 20)   /**< discard the packet due to the duplicate sequence number */
 #define ESP_ERR_MESH_DISCARD              (ESP_ERR_MESH_BASE + 21)   /**< discard the packet */
 #define ESP_ERR_MESH_VOTING               (ESP_ERR_MESH_BASE + 22)   /**< vote in progress */
+#define ESP_ERR_MESH_XMIT                 (ESP_ERR_MESH_BASE + 23)   /**< XMIT */
+#define ESP_ERR_MESH_QUEUE_READ           (ESP_ERR_MESH_BASE + 24)   /**< error in reading queue */
+#define ESP_ERR_MESH_PS                   (ESP_ERR_MESH_BASE + 25)   /**< mesh PS is not specified as enable or disable */
+#define ESP_ERR_MESH_RECV_RELEASE         (ESP_ERR_MESH_BASE + 26)   /**< release esp_mesh_recv_toDS */
 
 /**
  * @brief Flags bitmap for esp_mesh_send() and esp_mesh_recv()
@@ -149,6 +140,21 @@ extern "C" {
 #define MESH_ASSOC_FLAG_NETWORK_FREE        (0x08)     /**< no root in current network */
 #define MESH_ASSOC_FLAG_ROOTS_FOUND         (0x20)     /**< root conflict is found */
 #define MESH_ASSOC_FLAG_ROOT_FIXED          (0x40)     /**< fixed root */
+
+
+/**
+ * @brief Mesh PS (Power Save) duty cycle type
+ */
+#define MESH_PS_DEVICE_DUTY_REQUEST         (0x01)    /**< requests to join a network PS without specifying a device duty cycle. After the
+                                                           device joins the network, a network duty cycle will be provided by the network */
+#define MESH_PS_DEVICE_DUTY_DEMAND          (0x04)    /**< requests to join a network PS and specifies a demanded device duty cycle */
+#define MESH_PS_NETWORK_DUTY_MASTER         (0x80)    /**< indicates the device is the NWK-DUTY-MASTER (network duty cycle master) */
+
+/**
+ * @brief Mesh PS (Power Save) duty cycle applied rule
+ */
+#define MESH_PS_NETWORK_DUTY_APPLIED_ENTIRE         (0)    /** the specified network duty is applied to the entire network <*/
+#define MESH_PS_NETWORK_DUTY_APPLIED_UPLINK         (1)    /** the specified network duty is applied to only the up-link path <*/
 
 /*******************************************************
  *                Enumerations
@@ -190,6 +196,9 @@ typedef enum {
                                              after finding it. */
     MESH_EVENT_ROUTER_SWITCH,           /**< if users specify BSSID of the router in mesh configuration, when the root connects to another
                                              router with the same SSID, this event will be posted and the new router information is attached. */
+    MESH_EVENT_PS_PARENT_DUTY,          /**< parent duty */
+    MESH_EVENT_PS_CHILD_DUTY,           /**< child duty */
+    MESH_EVENT_PS_DEVICE_DUTY,          /**< device duty */
     MESH_EVENT_MAX,
 } mesh_event_id_t;
 
@@ -204,6 +213,7 @@ typedef enum {
     MESH_ROOT,    /**< the only sink of the mesh network. Has the ability to access external IP network */
     MESH_NODE,    /**< intermediate device. Has the ability to forward packets over the mesh network */
     MESH_LEAF,    /**< has no forwarding ability */
+    MESH_STA,     /**< connect to router with a standlone Wi-Fi station mode, no network expansion capability */
 } mesh_type_t;
 
 /**
@@ -214,6 +224,8 @@ typedef enum {
     MESH_PROTO_HTTP,    /**< HTTP protocol */
     MESH_PROTO_JSON,    /**< JSON format */
     MESH_PROTO_MQTT,    /**< MQTT protocol */
+    MESH_PROTO_AP,      /**< IP network mesh communication of node's AP interface */
+    MESH_PROTO_STA,     /**< IP network mesh communication of node's STA interface */
 } mesh_proto_t;
 
 /**
@@ -251,6 +263,14 @@ typedef enum {
     MESH_REASON_PARENT_UNENCRYPTED,         /**< connect to an unencrypted parent/router */
 } mesh_disconnect_reason_t;
 
+/**
+ * @brief Mesh topology
+ */
+typedef enum {
+    MESH_TOPO_TREE,                         /**< tree topology */
+    MESH_TOPO_CHAIN,                        /**< chain topology */
+} esp_mesh_topology_t;
+
 /*******************************************************
  *                Structures
  *******************************************************/
@@ -281,8 +301,9 @@ typedef struct {
  * @brief Parent connected information
  */
 typedef struct {
-    system_event_sta_connected_t connected; /**< parent information, same as Wi-Fi event SYSTEM_EVENT_STA_CONNECTED does */
-    uint8_t self_layer;                     /**< layer */
+    wifi_event_sta_connected_t connected; /**< parent information, same as Wi-Fi event SYSTEM_EVENT_STA_CONNECTED does */
+    uint16_t self_layer;                  /**< layer */
+    uint8_t duty;                         /**< parent duty */
 } mesh_event_connected_t;
 
 /**
@@ -296,7 +317,7 @@ typedef struct {
  * @brief Layer change information
  */
 typedef struct {
-    uint8_t new_layer; /**< new layer */
+    uint16_t new_layer; /**< new layer */
 } mesh_event_layer_change_t;
 
 /**
@@ -325,11 +346,6 @@ typedef struct {
 } mesh_event_find_network_t;
 
 /**
- * @brief IP settings from LwIP stack
- */
-typedef system_event_sta_got_ip_t mesh_event_root_got_ip_t;
-
-/**
  * @brief Root address
  */
 typedef mesh_addr_t mesh_event_root_address_t;
@@ -337,17 +353,17 @@ typedef mesh_addr_t mesh_event_root_address_t;
 /**
  * @brief Parent disconnected information
  */
-typedef system_event_sta_disconnected_t mesh_event_disconnected_t;
+typedef wifi_event_sta_disconnected_t mesh_event_disconnected_t;
 
 /**
  * @brief Child connected information
  */
-typedef system_event_ap_staconnected_t mesh_event_child_connected_t;
+typedef wifi_event_ap_staconnected_t mesh_event_child_connected_t;
 
 /**
  * @brief Child disconnected information
  */
-typedef system_event_ap_stadisconnected_t mesh_event_child_disconnected_t;
+typedef wifi_event_ap_stadisconnected_t mesh_event_child_disconnected_t;
 
 /**
  * @brief Root switch request information
@@ -398,7 +414,15 @@ typedef struct {
 /**
  * @brief New router information
  */
-typedef system_event_sta_connected_t mesh_event_router_switch_t;
+typedef wifi_event_sta_connected_t mesh_event_router_switch_t;
+
+/**
+ * @brief PS duty information
+ */
+typedef struct {
+    uint8_t duty;                                 /**< parent or child duty */
+    mesh_event_child_connected_t child_connected; /**< child info */
+} mesh_event_ps_duty_t;
 
 /**
  * @brief Mesh event information
@@ -417,7 +441,6 @@ typedef union {
                                                                 packets out. If not, devices had better to wait until this state changes to be
                                                                 MESH_TODS_REACHABLE. */
     mesh_event_vote_started_t vote_started;                /**< vote started */
-    mesh_event_root_got_ip_t got_ip;                       /**< root obtains IP address */
     mesh_event_root_address_t root_addr;                   /**< root address */
     mesh_event_root_switch_req_t switch_req;               /**< root switch request */
     mesh_event_root_conflict_t root_conflict;              /**< other powerful root */
@@ -426,6 +449,7 @@ typedef union {
     mesh_event_network_state_t network_state;              /**< network state, such as whether current mesh network has a root. */
     mesh_event_find_network_t find_network;                /**< network found that can join */
     mesh_event_router_switch_t router_switch;              /**< new router information */
+    mesh_event_ps_duty_t ps_duty;                          /**< PS duty information */
 } mesh_event_info_t;
 
 /**
@@ -467,8 +491,13 @@ typedef struct {
  * @brief Mesh softAP configuration
  */
 typedef struct {
-    uint8_t password[64];      /**< mesh softAP password */
-    uint8_t max_connection;    /**< max number of stations allowed to connect in, max 10 */
+    uint8_t password[64];              /**< mesh softAP password */
+    /**
+     * max number of stations allowed to connect in, default 6, max 10
+     * = max_connection + nonmesh_max_connection
+     */
+    uint8_t max_connection;            /**< max mesh connections */
+    uint8_t nonmesh_max_connection;    /**< max non-mesh connections */
 } mesh_ap_cfg_t;
 
 /**
@@ -587,6 +616,7 @@ esp_err_t esp_mesh_start(void);
  *             - Delete TX and RX queues.
  *             - Release resources.
  *             - Restore Wi-Fi softAP to default settings if Wi-Fi dual mode is enabled.
+ *             - Set Wi-Fi Power Save type to WIFI_PS_NONE.
  *
  * @return
  *    - ESP_OK
@@ -616,7 +646,7 @@ esp_err_t esp_mesh_stop(void);
  *               - If the packet is to the root ("to" parameter isn't NULL) or to external IP network, MESH_DATA_TODS should be set.
  *               - If the packet is from the root to an internal device, MESH_DATA_FROMDS should be set.
  *             - Specify whether this API is block or non-block, block by default
- *               - If needs non-block, MESH_DATA_NONBLOCK should be set.
+ *               - If needs non-blocking, MESH_DATA_NONBLOCK should be set. Otherwise, may use esp_mesh_send_block_time() to specify a blocking time.
  *             - In the situation of the root change, MESH_DATA_DROP identifies this packet can be dropped by the new root
  *               for upstream data to external IP network, we try our best to avoid data loss caused by the root change, but
  *               there is a risk that the new root is running out of memory because most of memory is occupied by the pending data which
@@ -649,6 +679,17 @@ esp_err_t esp_mesh_stop(void);
  */
 esp_err_t esp_mesh_send(const mesh_addr_t *to, const mesh_data_t *data,
                         int flag, const mesh_opt_t opt[],  int opt_count);
+/**
+ * @brief      Set blocking time of esp_mesh_send()
+ *
+ * @attention  This API shall be called before mesh is started.
+ *
+ * @param[in]  time_ms  blocking time of esp_mesh_send(), unit:ms
+ *
+ * @return
+ *    - ESP_OK
+ */
+esp_err_t esp_mesh_send_block_time(uint32_t time_ms);
 
 /**
  * @brief      Receive a packet targeted to self over the mesh network
@@ -717,6 +758,7 @@ esp_err_t esp_mesh_recv(mesh_addr_t *from, mesh_data_t *data, int timeout_ms,
  *    - ESP_ERR_MESH_NOT_START
  *    - ESP_ERR_MESH_TIMEOUT
  *    - ESP_ERR_MESH_DISCARD
+ *    - ESP_ERR_MESH_RECV_RELEASE
  */
 esp_err_t esp_mesh_recv_toDS(mesh_addr_t *from, mesh_addr_t *to,
                              mesh_data_t *data, int timeout_ms, int *flag, mesh_opt_t opt[],
@@ -812,8 +854,10 @@ esp_err_t esp_mesh_get_id(mesh_addr_t *id);
 
 /**
  * @brief      Designate device type over the mesh network
+ *            - MESH_IDLE: designates a device as a self-organized node for a mesh network
  *            - MESH_ROOT: designates the root node for a mesh network
- *            - MESH_LEAF: designates a device as a standalone Wi-Fi station
+ *            - MESH_LEAF: designates a device as a standalone Wi-Fi station that connects to a parent
+ *            - MESH_STA: designates a device as a standalone Wi-Fi station that connects to a router
  *
  * @param[in]  type  device type
  *
@@ -834,7 +878,9 @@ esp_err_t esp_mesh_set_type(mesh_type_t type);
 mesh_type_t esp_mesh_get_type(void);
 
 /**
- * @brief      Set network max layer value (max:25, default:25)
+ * @brief      Set network max layer value
+ *             - for tree topology, the max is 25.
+ *             - for chain topology, the max is 1000.
  *             - Network max layer limits the max hop count.
  *
  * @attention  This API shall be called before mesh is started.
@@ -892,7 +938,8 @@ esp_err_t esp_mesh_set_ap_authmode(wifi_auth_mode_t authmode);
 wifi_auth_mode_t esp_mesh_get_ap_authmode(void);
 
 /**
- * @brief      Set mesh softAP max connection value
+ * @brief      Set mesh max connection value
+ *             - Set mesh softAP max connection = mesh max connection + non-mesh max connection
  *
  * @attention  This API shall be called before mesh is started.
  *
@@ -905,11 +952,18 @@ wifi_auth_mode_t esp_mesh_get_ap_authmode(void);
 esp_err_t esp_mesh_set_ap_connections(int connections);
 
 /**
- * @brief      Get mesh softAP max connection configuration
+ * @brief      Get mesh max connection configuration
  *
- * @return     the number of max connections
+ * @return     the number of mesh max connections
  */
 int esp_mesh_get_ap_connections(void);
+
+/**
+ * @brief      Get non-mesh max connection configuration
+ *
+ * @return     the number of non-mesh max connections
+ */
+int esp_mesh_get_non_mesh_connections(void);
 
 /**
  * @brief      Get current layer value over the mesh network
@@ -1004,7 +1058,7 @@ bool esp_mesh_get_self_organized(void);
 esp_err_t esp_mesh_waive_root(const mesh_vote_t *vote, int reason);
 
 /**
- * @brief      Set vote percentage threshold for approval of being a root
+ * @brief      Set vote percentage threshold for approval of being a root (default:0.9)
  *             - During the networking, only obtaining vote percentage reaches this threshold,
  *             the device could be a root.
  *
@@ -1318,6 +1372,7 @@ bool esp_mesh_is_root_fixed(void);
  * @param[in]  parent_mesh_id  parent mesh ID,
  *             - If this value is not set, the original mesh ID is used.
  * @param[in]  my_type  mesh type
+ *             - MESH_STA is not supported.
  *             - If the parent set for the device is the same as the router in the network configuration,
  *            then my_type shall set MESH_ROOT and my_layer shall set MESH_ROOT_LAYER.
  * @param[in]  my_layer  mesh layer
@@ -1458,6 +1513,168 @@ esp_err_t esp_mesh_get_router_bssid(uint8_t *router_bssid);
  */
 int64_t esp_mesh_get_tsf_time(void);
 
+/**
+ * @brief      Set mesh topology. The default value is MESH_TOPO_TREE
+ *             - MESH_TOPO_CHAIN supports up to 1000 layers
+ *
+ * @attention  This API shall be called before mesh is started.
+ *
+ * @param[in]  topo  MESH_TOPO_TREE or MESH_TOPO_CHAIN
+ *
+ * @return
+ *    - ESP_OK
+ *    - ESP_MESH_ERR_ARGUMENT
+ *    - ESP_ERR_MESH_NOT_ALLOWED
+ */
+esp_err_t esp_mesh_set_topology(esp_mesh_topology_t topo);
+
+/**
+ * @brief      Get mesh topology
+ *
+ * @return     MESH_TOPO_TREE or MESH_TOPO_CHAIN
+ */
+esp_mesh_topology_t esp_mesh_get_topology(void);
+
+/**
+ * @brief      Enable mesh Power Save function
+ *
+ * @attention  This API shall be called before mesh is started.
+ *
+ * @return
+ *    - ESP_OK
+ *    - ESP_ERR_WIFI_NOT_INIT
+ *    - ESP_ERR_MESH_NOT_ALLOWED
+ */
+esp_err_t esp_mesh_enable_ps(void);
+
+/**
+ * @brief      Disable mesh Power Save function
+ *
+ * @attention  This API shall be called before mesh is started.
+ *
+ * @return
+ *    - ESP_OK
+ *    - ESP_ERR_WIFI_NOT_INIT
+ *    - ESP_ERR_MESH_NOT_ALLOWED
+ */
+esp_err_t esp_mesh_disable_ps(void);
+
+/**
+ * @brief      Check whether the mesh Power Save function is enabled
+ *
+ * @return     true/false
+ */
+bool esp_mesh_is_ps_enabled(void);
+
+/**
+ * @brief      Check whether the device is in active state
+ *             - If the device is not in active state, it will neither transmit nor receive frames.
+ *
+ * @return     true/false
+ */
+bool esp_mesh_is_device_active(void);
+
+/**
+ * @brief      Set the device duty cycle and type
+ *             - The range of dev_duty values is 1 to 100. The default value is 10.
+ *             - dev_duty = 100, the PS will be stopped.
+ *             - dev_duty is better to not less than 5.
+ *             - dev_duty_type could be MESH_PS_DEVICE_DUTY_REQUEST or MESH_PS_DEVICE_DUTY_DEMAND.
+ *             - If dev_duty_type is set to MESH_PS_DEVICE_DUTY_REQUEST, the device will use a nwk_duty provided by the network.
+ *             - If dev_duty_type is set to MESH_PS_DEVICE_DUTY_DEMAND, the device will use the specified dev_duty.
+ *
+ * @attention  This API can be called at any time after mesh is started.
+ *
+ * @param[in]  dev_duty  device duty cycle
+ * @param[in]  dev_duty_type  device PS duty cycle type, not accept MESH_PS_NETWORK_DUTY_MASTER
+ *
+ * @return
+ *    - ESP_OK
+ *    - ESP_FAIL
+ */
+esp_err_t esp_mesh_set_active_duty_cycle(int dev_duty, int dev_duty_type);
+
+/**
+ * @brief      Get device duty cycle and type
+ *
+ * @param[out] dev_duty  device duty cycle
+ * @param[out] dev_duty_type  device PS duty cycle type
+ *
+ * @return
+ *    - ESP_OK
+ */
+esp_err_t esp_mesh_get_active_duty_cycle(int* dev_duty, int* dev_duty_type);
+
+/**
+ * @brief      Set the network duty cycle, duration and rule
+ *             - The range of nwk_duty values is 1 to 100. The default value is 10.
+ *             - nwk_duty is the network duty cycle the entire network or the up-link path will use. A device that successfully
+ *             sets the nwk_duty is known as a NWK-DUTY-MASTER.
+ *             - duration_mins specifies how long the specified nwk_duty will be used. Once duration_mins expires, the root will take
+ *             over as the NWK-DUTY-MASTER. If an existing NWK-DUTY-MASTER leaves the network, the root will take over as the
+ *             NWK-DUTY-MASTER again.
+ *             - duration_mins = (-1) represents nwk_duty will be used until a new NWK-DUTY-MASTER with a different nwk_duty appears.
+ *             - Only the root can set duration_mins to (-1).
+ *             - If applied_rule is set to MESH_PS_NETWORK_DUTY_APPLIED_ENTIRE, the nwk_duty will be used by the entire network.
+ *             - If applied_rule is set to MESH_PS_NETWORK_DUTY_APPLIED_UPLINK, the nwk_duty will only be used by the up-link path nodes.
+ *             - The root does not accept MESH_PS_NETWORK_DUTY_APPLIED_UPLINK.
+ *             - A nwk_duty with duration_mins(-1) set by the root is the default network duty cycle used by the entire network.
+ *
+ * @attention  This API can be called at any time after mesh is started.
+ *             - In self-organized network, if this API is called before mesh is started in all devices, (1)nwk_duty shall be set to the
+ *             same value for all devices; (2)duration_mins shall be set to (-1); (3)applied_rule shall be set to
+ *             MESH_PS_NETWORK_DUTY_APPLIED_ENTIRE; after the voted root appears, the root will become the NWK-DUTY-MASTER and broadcast
+ *             the nwk_duty and its identity of NWK-DUTY-MASTER.
+ *             - If the root is specified (FIXED-ROOT), call this API in the root to provide a default nwk_duty for the entire network.
+ *             - After joins the network, any device can call this API to change the nwk_duty, duration_mins or applied_rule.
+ *
+ * @param[in]  nwk_duty  network duty cycle
+ * @param[in]  duration_mins  duration (unit: minutes)
+ * @param[in]  applied_rule  only support MESH_PS_NETWORK_DUTY_APPLIED_ENTIRE
+ *
+ * @return
+ *    - ESP_OK
+ *    - ESP_FAIL
+ */
+esp_err_t esp_mesh_set_network_duty_cycle(int nwk_duty, int duration_mins, int applied_rule);
+
+/**
+ * @brief      Get the network duty cycle, duration, type and rule
+ *
+ * @param[out] nwk_duty  current network duty cycle
+ * @param[out] duration_mins  the duration of current nwk_duty
+ * @param[out] dev_duty_type  if it includes MESH_PS_DEVICE_DUTY_MASTER, this device is the current NWK-DUTY-MASTER.
+ * @param[out] applied_rule  MESH_PS_NETWORK_DUTY_APPLIED_ENTIRE
+ *
+ * @return
+ *    - ESP_OK
+ */
+esp_err_t esp_mesh_get_network_duty_cycle(int* nwk_duty, int* duration_mins, int* dev_duty_type, int* applied_rule);
+
+/**
+ * @brief      Get the running active duty cycle
+ *          - The running active duty cycle of the root is 100.
+ *          - If duty type is set to MESH_PS_DEVICE_DUTY_REQUEST, the running active duty cycle is nwk_duty provided by the network.
+ *          - If duty type is set to MESH_PS_DEVICE_DUTY_DEMAND, the running active duty cycle is dev_duty specified by the users.
+ *          - In a mesh network, devices are typically working with a certain duty-cycle (transmitting, receiving and sleep) to
+ *            reduce the power consumption. The running active duty cycle decides the amount of awake time within a beacon interval.
+ *            At each start of beacon interval, all devices wake up, broadcast beacons, and transmit packets if they do have pending
+ *            packets for their parents or for their children. Note that Low-duty-cycle means devices may not be active in most of
+ *            the time, the latency of data transmission might be greater.
+ *
+ * @return     the running active duty cycle
+ */
+int esp_mesh_get_running_active_duty_cycle(void);
+
+/**
+ * @brief      Duty signaling
+ *
+ * @param[in]  fwd_times  the times of forwarding duty signaling packets
+ *
+ * @return
+ *    - ESP_OK
+ */
+esp_err_t esp_mesh_ps_duty_signaling(int fwd_times);
 #ifdef __cplusplus
 }
 #endif

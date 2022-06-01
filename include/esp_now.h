@@ -1,16 +1,8 @@
-// Copyright 2015-2016 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * SPDX-FileCopyrightText: 2019-2022 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 #ifndef __ESP_NOW_H__
 #define __ESP_NOW_H__
@@ -190,7 +182,7 @@ esp_err_t esp_now_unregister_send_cb(void);
   *          - ESP_ERR_ESPNOW_NOT_INIT : ESPNOW is not initialized
   *          - ESP_ERR_ESPNOW_ARG : invalid argument
   *          - ESP_ERR_ESPNOW_INTERNAL : internal error
-  *          - ESP_ERR_ESPNOW_NO_MEM : out of memory
+  *          - ESP_ERR_ESPNOW_NO_MEM : out of memory, when this happens, you can delay a while before sending the next data
   *          - ESP_ERR_ESPNOW_NOT_FOUND : peer is not found
   *          - ESP_ERR_ESPNOW_IF : current WiFi interface doesn't match that of peer
   */
@@ -238,6 +230,20 @@ esp_err_t esp_now_del_peer(const uint8_t *peer_addr);
 esp_err_t esp_now_mod_peer(const esp_now_peer_info_t *peer);
 
 /**
+  * @brief      Config ESPNOW rate of specified interface
+  *
+  * @attention  1. This API should be called after esp_wifi_start().
+  *
+  * @param      ifx  Interface to be configured.
+  * @param      rate Phy rate to be configured.
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - others: failed
+  */
+esp_err_t esp_wifi_config_espnow_rate(wifi_interface_t ifx, wifi_phy_rate_t rate);
+
+/**
   * @brief     Get a peer whose MAC address matches peer_addr from peer list
   *
   * @param     peer_addr  peer MAC address
@@ -252,7 +258,7 @@ esp_err_t esp_now_mod_peer(const esp_now_peer_info_t *peer);
 esp_err_t esp_now_get_peer(const uint8_t *peer_addr, esp_now_peer_info_t *peer);
 
 /**
-  * @brief     Fetch a peer from peer list
+  * @brief     Fetch a peer from peer list. Only return the peer which address is unicast, for the multicast/broadcast address, the function will ignore and try to find the next in the peer list.
   *
   * @param     from_head  fetch from head of list or not
   * @param     peer  peer information
@@ -301,6 +307,21 @@ esp_err_t esp_now_get_peer_num(esp_now_peer_num_t *num);
   *          - ESP_ERR_ESPNOW_ARG : invalid argument
   */
 esp_err_t esp_now_set_pmk(const uint8_t *pmk);
+
+/**
+  * @brief     Set wake window for esp_now to wake up in interval unit
+  *
+  * @param     window  Milliseconds would the chip keep waked each interval, from 0 to 65535.
+  *
+  * @attention 1. This configuration could work at connected status.
+  *               When ESP_WIFI_STA_DISCONNECTED_PM_ENABLE is enabled, this configuration could work at disconnected status.
+  * @attention 2. Default value is the maximum.
+  *
+  * @return
+  *          - ESP_OK : succeed
+  *          - ESP_ERR_ESPNOW_NOT_INIT : ESPNOW is not initialized
+  */
+esp_err_t esp_now_set_wake_window(uint16_t window);
 
 /**
   * @}

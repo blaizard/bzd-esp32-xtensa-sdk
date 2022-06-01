@@ -1,21 +1,14 @@
-// Copyright 2018-2018 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * SPDX-FileCopyrightText: 2018-2021 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 #ifndef __ESP_COEXIST_INTERNAL_H__
 #define __ESP_COEXIST_INTERNAL_H__
 
 #include <stdbool.h>
+#include "esp_coexist.h"
 #include "esp_coexist_adapter.h"
 
 #ifdef __cplusplus
@@ -39,7 +32,6 @@ typedef void (* coex_func_cb_t)(uint32_t event, int sched_cnt);
  */
 esp_err_t coex_pre_init(void);
 
-
 /**
  * @brief Init software coexist
  *        extern function for internal use.
@@ -55,16 +47,18 @@ esp_err_t coex_init(void);
 void coex_deinit(void);
 
 /**
- * @brief Pause software coexist
+ * @brief Enable software coexist
  *        extern function for internal use.
+ *
+ * @return Enable ok or failed.
  */
-void coex_pause(void);
+esp_err_t coex_enable(void);
 
 /**
- * @brief Resume software coexist
+ * @brief Disable software coexist
  *        extern function for internal use.
  */
-void coex_resume(void);
+void coex_disable(void);
 
 /**
  * @brief Get software coexist version string
@@ -113,44 +107,101 @@ int coex_wifi_request(uint32_t event, uint32_t latency, uint32_t duration);
 int coex_wifi_release(uint32_t event);
 
 /**
- * @brief Blue tooth requests coexistence.
+ * @brief Set WiFi channel to coexistence module.
  *
- *  @param event : blue tooth event
- *  @param latency : blue tooth will request coexistence after latency
- *  @param duration : duration for blue tooth to request coexistence
+ *  @param primary : WiFi primary channel
+ *  @param secondary : WiFi secondary channel
  *  @return : 0 - success, other - failed
  */
-int coex_bt_request(uint32_t event, uint32_t latency, uint32_t duration);
+int coex_wifi_channel_set(uint8_t primary, uint8_t secondary);
 
 /**
- * @brief Blue tooth release coexistence.
+ * @brief Get coexistence event duration.
  *
- *  @param event : blue tooth event
+ *  @param event : Coexistence event
+ *  @param duration: Coexistence event duration
  *  @return : 0 - success, other - failed
  */
-int coex_bt_release(uint32_t event);
+int coex_event_duration_get(uint32_t event, uint32_t *duration);
 
+#if SOC_COEX_HW_PTI
 /**
- * @brief Register callback function for blue tooth.
+ * @brief Get coexistence event priority.
  *
- *  @param cb : callback function
+ *  @param event : Coexistence event
+ *  @param pti: Coexistence event priority
  *  @return : 0 - success, other - failed
  */
-int coex_register_bt_cb(coex_func_cb_t cb);
+int coex_pti_get(uint32_t event, uint8_t *pti);
+#endif
 
 /**
- * @brief Lock before reset base band.
+ * @brief Clear coexistence status.
  *
- *  @return : lock value
+ *  @param type : Coexistence status type
+ *  @param status: Coexistence status
  */
-uint32_t coex_bb_reset_lock(void);
+void coex_schm_status_bit_clear(uint32_t type, uint32_t status);
 
 /**
- * @brief Unlock after reset base band.
+ * @brief Set coexistence status.
  *
- *  @param restore : lock value
+ *  @param type : Coexistence status type
+ *  @param status: Coexistence status
  */
-void coex_bb_reset_unlock(uint32_t restore);
+void coex_schm_status_bit_set(uint32_t type, uint32_t status);
+
+/**
+ * @brief Set coexistence scheme interval.
+ *
+ *  @param interval : Coexistence scheme interval
+ *  @return : 0 - success, other - failed
+ */
+int coex_schm_interval_set(uint32_t interval);
+
+/**
+ * @brief Get coexistence scheme interval.
+ *
+ *  @return : Coexistence scheme interval
+ */
+uint32_t coex_schm_interval_get(void);
+
+/**
+ * @brief Get current coexistence scheme period.
+ *
+ *  @return : Coexistence scheme period
+ */
+uint8_t coex_schm_curr_period_get(void);
+
+/**
+ * @brief Get current coexistence scheme phase.
+ *
+ *  @return : Coexistence scheme phase
+ */
+void * coex_schm_curr_phase_get(void);
+
+/**
+ * @brief Set current coexistence scheme phase index.
+ *
+ *  @param interval : Coexistence scheme phase index
+ *  @return : 0 - success, other - failed
+ */
+int coex_schm_curr_phase_idx_set(int idx);
+
+/**
+ * @brief Get current coexistence scheme phase index.
+ *
+ *  @return : Coexistence scheme phase index
+ */
+int coex_schm_curr_phase_idx_get(void);
+
+/**
+ * @brief Register WiFi callback for coexistence starts.
+ *
+ *  @param cb : WiFi callback
+ *  @return : 0 - success, other - failed
+ */
+int coex_register_start_cb(int (* cb)(void));
 
 /**
  * @brief Register coexistence adapter functions.
@@ -159,6 +210,29 @@ void coex_bb_reset_unlock(uint32_t restore);
  *  @return : ESP_OK - success, other - failed
  */
 esp_err_t esp_coex_adapter_register(coex_adapter_funcs_t *funcs);
+
+#if CONFIG_EXTERNAL_COEX_ENABLE
+/**
+  * @brief     Set external coexistence pti level and enable it.
+  *
+  * @param     level1    external coex low pti
+  * @param     level2    external coex mid pti
+  * @param     level3    external coex high pti
+  *
+  * @return
+  *    - ESP_OK: succeed
+  */
+esp_err_t esp_coex_external_set(esp_coex_pti_level_t level1,
+         esp_coex_pti_level_t level2, esp_coex_pti_level_t level3);
+
+/**
+  * @brief     Disable external coexist
+  *
+  * @return
+  *    - ESP_OK: succeed
+  */
+void esp_coex_external_stop(void);
+#endif    /*External Coex*/
 
 /**
   * @brief     Check the MD5 values of the coexistence adapter header files in IDF and WiFi library

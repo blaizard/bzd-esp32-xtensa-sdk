@@ -1,16 +1,8 @@
-// Copyright 2015-2019 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * SPDX-FileCopyrightText: 2015-2022 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 #pragma once
 
@@ -20,11 +12,10 @@ extern "C" {
 
 #ifndef __ASSEMBLER__
 
+#include <stdbool.h>
 #include "esp_err.h"
-
-#define ESP_WATCHPOINT_LOAD 0x40000000
-#define ESP_WATCHPOINT_STORE 0x80000000
-#define ESP_WATCHPOINT_ACCESS 0xC0000000
+#include "soc/soc.h"  // [refactor-todo] IDF-2297
+#include "esp_cpu.h"
 
 /*
  * @brief   Structure used for backtracing
@@ -42,6 +33,7 @@ typedef struct {
     uint32_t pc;       /* PC of the current frame */
     uint32_t sp;       /* SP of the current frame */
     uint32_t next_pc;  /* PC of the current frame's caller */
+    const void *exc_frame;  /* Pointer to the full frame data structure, if applicable */
 } esp_backtrace_frame_t;
 
 /**
@@ -50,32 +42,6 @@ typedef struct {
  * @param fn  Pointer to the target breakpoint position
  */
 void esp_set_breakpoint_if_jtag(void *fn);
-
-/**
- * @brief Set a watchpoint to break/panic when a certain memory range is accessed.
- *
- * @param no Watchpoint number. On the ESP32, this can be 0 or 1.
- * @param adr Base address to watch
- * @param size Size of the region, starting at the base address, to watch. Must
- *             be one of 2^n, with n in [0..6].
- * @param flags One of ESP_WATCHPOINT_* flags
- *
- * @return ESP_ERR_INVALID_ARG on invalid arg, ESP_OK otherwise
- *
- * @warning The ESP32 watchpoint hardware watches a region of bytes by effectively
- *          masking away the lower n bits for a region with size 2^n. If adr does
- *          not have zero for these lower n bits, you may not be watching the
- *          region you intended.
- */
-esp_err_t esp_set_watchpoint(int no, void *adr, int size, int flags);
-
-/**
- * @brief Clear a watchpoint
- *
- * @param no Watchpoint to clear
- *
- */
-void esp_clear_watchpoint(int no);
 
 /**
  * Get the first frame of the current stack's backtrace
@@ -115,6 +81,24 @@ extern void esp_backtrace_get_start(uint32_t *pc, uint32_t *sp, uint32_t *next_p
 bool esp_backtrace_get_next_frame(esp_backtrace_frame_t *frame);
 
 /**
+ * @brief Print the backtrace from specified frame.
+ *
+ * @param depth The maximum number of stack frames to print (should be > 0)
+ * @param frame Starting frame to print from
+ * @param panic Indicator if backtrace print is during a system panic
+ *
+ * @note On the ESP32, users must call esp_backtrace_get_start() first to flush the stack.
+ * @note If a esp_backtrace_frame_t* frame is obtained though a call to esp_backtrace_get_start()
+ * from some example function func_a(), then frame is only valid within the frame/scope of func_a().
+ * Users should not attempt to pass/use frame other frames within the same stack of different stacks.
+ *
+ * @return
+ *      - ESP_OK    Backtrace successfully printed to completion or to depth limit
+ *      - ESP_FAIL  Backtrace is corrupted
+ */
+esp_err_t esp_backtrace_print_from_frame(int depth, const esp_backtrace_frame_t* frame, bool panic);
+
+/**
  * @brief Print the backtrace of the current stack
  *
  * @param depth The maximum number of stack frames to print (should be > 0)
@@ -125,6 +109,23 @@ bool esp_backtrace_get_next_frame(esp_backtrace_frame_t *frame);
  */
 esp_err_t esp_backtrace_print(int depth);
 
+/**
+ * @brief Set a watchpoint to break/panic when a certain memory range is accessed.
+ * Superseded by esp_cpu_set_watchpoint in esp_cpu.h.
+ */
+static inline __attribute__((deprecated)) esp_err_t esp_set_watchpoint(int no, void *adr, int size, int flags)
+{
+    return esp_cpu_set_watchpoint(no, adr, size, flags);
+}
+
+/**
+ * @brief Set a watchpoint to break/panic when a certain memory range is accessed.
+ * Superseded by esp_cpu_clear_watchpoint in esp_cpu.h.
+ */
+static inline __attribute__((deprecated)) void esp_clear_watchpoint(int no)
+{
+    esp_cpu_clear_watchpoint(no);
+}
 
 #endif
 #ifdef __cplusplus

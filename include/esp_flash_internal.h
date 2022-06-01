@@ -1,21 +1,14 @@
-// Copyright 2015-2019 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * SPDX-FileCopyrightText: 2015-2022 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 #pragma once
 #include "esp_err.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include <driver/spi_common_internal.h>
 #include "sdkconfig.h"
 
 #include "esp_flash.h"
@@ -51,7 +44,7 @@ esp_err_t esp_flash_app_init(void);
 #endif
 
 /**
- *  Disable OS-level SPI flash protections in IDF
+ *  Disable (or enable) OS-level SPI flash protections in IDF
  *
  *  Called by the IDF internal code (e.g. coredump). You do not need to call this in your own applications.
  *
@@ -68,12 +61,33 @@ esp_err_t esp_flash_app_disable_protect(bool disable);
  *
  * @param chip The chip to init os functions.
  * @param host_id Which SPI host to use, 1 for SPI1, 2 for SPI2 (HSPI), 3 for SPI3 (VSPI)
+ * @param dev_handle SPI bus lock device handle to acquire during flash operations
  *
  * @return
  *      - ESP_OK if success
  *      - ESP_ERR_INVALID_ARG if host_id is invalid
  */
-esp_err_t esp_flash_init_os_functions(esp_flash_t *chip, int host_id);
+esp_err_t esp_flash_init_os_functions(esp_flash_t *chip, int host_id, spi_bus_lock_dev_handle_t dev_handle);
+
+/**
+ * @brief Deinitialize OS-level functions
+ *
+ * @param chip              The chip to deinit os functions
+ * @param out_dev_handle    The SPI bus lock passed from `esp_flash_init_os_functions`. The caller should deinitialize
+ *                          the lock.
+ * @return always ESP_OK.
+ */
+esp_err_t esp_flash_deinit_os_functions(esp_flash_t* chip, spi_bus_lock_dev_handle_t* out_dev_handle);
+
+/**
+ * @brief Initialize the bus lock on the SPI1 bus. Should be called if drivers (including esp_flash)
+ * wants to use SPI1 bus.
+ *
+ * @note When using legacy spi flash API, the bus lock will not be available on SPI1 bus.
+ *
+ * @return esp_err_t always ESP_OK.
+ */
+esp_err_t esp_flash_init_main_bus_lock(void);
 
 /**
  *  Initialize OS-level functions for the main flash chip.
@@ -82,7 +96,7 @@ esp_err_t esp_flash_init_os_functions(esp_flash_t *chip, int host_id);
  *
  * @return always ESP_OK
  */
-esp_err_t esp_flash_app_init_os_functions(esp_flash_t* chip);
+esp_err_t esp_flash_app_enable_os_functions(esp_flash_t* chip);
 
 /**
  *  Disable OS-level functions for the main flash chip during special phases (e.g. coredump)

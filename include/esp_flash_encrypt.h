@@ -1,16 +1,8 @@
-// Copyright 2015-2016 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * SPDX-FileCopyrightText: 2015-2022 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #pragma once
 
 #include <stdbool.h>
@@ -19,7 +11,8 @@
 #ifndef BOOTLOADER_BUILD
 #include "esp_spi_flash.h"
 #endif
-#include "soc/efuse_periph.h"
+#include "hal/efuse_ll.h"
+#include "sdkconfig.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,18 +39,7 @@ typedef enum {
  *
  * @return true if flash encryption is enabled.
  */
-static inline /** @cond */ IRAM_ATTR /** @endcond */ bool esp_flash_encryption_enabled(void) {
-    uint32_t flash_crypt_cnt = REG_GET_FIELD(EFUSE_BLK0_RDATA0_REG, EFUSE_RD_FLASH_CRYPT_CNT);
-    /* __builtin_parity is in flash, so we calculate parity inline */
-    bool enabled = false;
-    while(flash_crypt_cnt) {
-        if (flash_crypt_cnt & 1) {
-            enabled = !enabled;
-        }
-        flash_crypt_cnt >>= 1;
-    }
-    return enabled;
-}
+bool esp_flash_encryption_enabled(void);
 
 /* @brief Update on-device flash encryption
  *
@@ -121,8 +103,12 @@ esp_err_t esp_flash_encrypt_region(uint32_t src_addr, size_t data_length);
  * is enabled but secure boot is not used. This should protect against
  * serial re-flashing of an unauthorised code in absence of secure boot.
  *
+ * @note On ESP32 V3 only, write protecting FLASH_CRYPT_CNT will also prevent
+ * disabling UART Download Mode. If both are wanted, call
+ * esp_efuse_disable_rom_download_mode() before calling this function.
+ *
  */
-void esp_flash_write_protect_crypt_cnt();
+void esp_flash_write_protect_crypt_cnt(void);
 
 /** @brief Return the flash encryption mode
  *
@@ -131,7 +117,7 @@ void esp_flash_write_protect_crypt_cnt();
  *
  * @return
  */
-esp_flash_enc_mode_t esp_get_flash_encryption_mode();
+esp_flash_enc_mode_t esp_get_flash_encryption_mode(void);
 
 
 /** @brief Check the flash encryption mode during startup
@@ -147,6 +133,23 @@ esp_flash_enc_mode_t esp_get_flash_encryption_mode();
  *  config in any way
  */
 void esp_flash_encryption_init_checks(void);
+
+/** @brief Set all secure eFuse features related to flash encryption
+ *
+ * @return
+ *  - ESP_OK - Successfully
+ */
+esp_err_t esp_flash_encryption_enable_secure_features(void);
+
+/** @brief Switches Flash Encryption from "Development" to "Release"
+ *
+ * If already in "Release" mode, the function will do nothing.
+ * If flash encryption efuse is not enabled yet then abort.
+ * It burns:
+ *  - "disable encrypt in dl mode"
+ *  - set FLASH_CRYPT_CNT efuse to max
+ */
+void esp_flash_encryption_set_release_mode(void);
 
 #ifdef __cplusplus
 }

@@ -1,16 +1,8 @@
-// Copyright 2015-2016 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * SPDX-FileCopyrightText: 2015-2021 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 
 /*               Notes about WiFi Programming
@@ -42,7 +34,7 @@
  *
  * The event task is a daemon task, which receives events from WiFi driver or from other subsystem, such
  * as TCPIP stack, event task will call the default callback function on receiving the event. For example,
- * on receiving event SYSTEM_EVENT_STA_CONNECTED, it will call tcpip_adapter_start() to start the DHCP
+ * on receiving event WIFI_EVENT_STA_CONNECTED, it will call esp_netif API to start the DHCP
  * client in it's default handler.
  *
  * Application can register it's own event callback function by API esp_event_init, then the application callback
@@ -63,6 +55,7 @@
 #include "esp_wifi_types.h"
 #include "esp_event.h"
 #include "esp_private/esp_wifi_private.h"
+#include "esp_wifi_default.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -85,14 +78,15 @@ extern "C" {
 #define ESP_ERR_WIFI_NOT_CONNECT (ESP_ERR_WIFI_BASE + 15)  /*!< Station still in disconnect status */
 
 #define ESP_ERR_WIFI_POST        (ESP_ERR_WIFI_BASE + 18)  /*!< Failed to post the event to WiFi task */
-#define ESP_ERR_WIFI_INIT_STATE  (ESP_ERR_WIFI_BASE + 19)  /*!< Invalod WiFi state when init/deinit is called */
+#define ESP_ERR_WIFI_INIT_STATE  (ESP_ERR_WIFI_BASE + 19)  /*!< Invalid WiFi state when init/deinit is called */
 #define ESP_ERR_WIFI_STOP_STATE  (ESP_ERR_WIFI_BASE + 20)  /*!< Returned when WiFi is stopping */
+#define ESP_ERR_WIFI_NOT_ASSOC   (ESP_ERR_WIFI_BASE + 21)  /*!< The WiFi connection is not associated */
+#define ESP_ERR_WIFI_TX_DISALLOW (ESP_ERR_WIFI_BASE + 22)  /*!< The WiFi TX is disallowed */
 
 /**
  * @brief WiFi stack configuration parameters passed to esp_wifi_init call.
  */
 typedef struct {
-    system_event_handler_t event_handler;          /**< WiFi event handler */
     wifi_osi_funcs_t*      osi_funcs;              /**< WiFi OS functions */
     wpa_crypto_funcs_t     wpa_crypto_funcs;       /**< WiFi station crypto functions when connect */
     int                    static_rx_buf_num;      /**< WiFi static RX buffer number */
@@ -100,16 +94,19 @@ typedef struct {
     int                    tx_buf_type;            /**< WiFi TX buffer type */
     int                    static_tx_buf_num;      /**< WiFi static TX buffer number */
     int                    dynamic_tx_buf_num;     /**< WiFi dynamic TX buffer number */
+    int                    cache_tx_buf_num;       /**< WiFi TX cache buffer number */
     int                    csi_enable;             /**< WiFi channel state information enable flag */
     int                    ampdu_rx_enable;        /**< WiFi AMPDU RX feature enable flag */
     int                    ampdu_tx_enable;        /**< WiFi AMPDU TX feature enable flag */
+    int                    amsdu_tx_enable;        /**< WiFi AMSDU TX feature enable flag */
     int                    nvs_enable;             /**< WiFi NVS flash enable flag */
     int                    nano_enable;            /**< Nano option for printf/scan family enable flag */
-    int                    tx_ba_win;              /**< WiFi Block Ack TX window size */
     int                    rx_ba_win;              /**< WiFi Block Ack RX window size */
     int                    wifi_task_core_id;      /**< WiFi Task Core ID */
     int                    beacon_max_len;         /**< WiFi softAP maximum length of the beacon */
     int                    mgmt_sbuf_num;          /**< WiFi management short buffer number, the minimum value is 6, the maximum value is 32 */
+    uint64_t               feature_caps;           /**< Enables additional WiFi features and capabilities */
+    bool                   sta_disconnected_pm;    /**< WiFi Power Management for station at disconnected status */
     int                    magic;                  /**< WiFi init magic number, it should be the last field */
 } wifi_init_config_t;
 
@@ -117,6 +114,12 @@ typedef struct {
 #define WIFI_STATIC_TX_BUFFER_NUM CONFIG_ESP32_WIFI_STATIC_TX_BUFFER_NUM
 #else
 #define WIFI_STATIC_TX_BUFFER_NUM 0
+#endif
+
+#if (CONFIG_ESP32_SPIRAM_SUPPORT || CONFIG_ESP32S2_SPIRAM_SUPPORT || CONFIG_ESP32S3_SPIRAM_SUPPORT)
+#define WIFI_CACHE_TX_BUFFER_NUM  CONFIG_ESP32_WIFI_CACHE_TX_BUFFER_NUM
+#else
+#define WIFI_CACHE_TX_BUFFER_NUM  0
 #endif
 
 #ifdef CONFIG_ESP32_WIFI_DYNAMIC_TX_BUFFER_NUM
@@ -143,6 +146,12 @@ typedef struct {
 #define WIFI_AMPDU_TX_ENABLED        0
 #endif
 
+#if CONFIG_ESP32_WIFI_AMSDU_TX_ENABLED
+#define WIFI_AMSDU_TX_ENABLED        1
+#else
+#define WIFI_AMSDU_TX_ENABLED        0
+#endif
+
 #if CONFIG_ESP32_WIFI_NVS_ENABLED
 #define WIFI_NVS_ENABLED          1
 #else
@@ -156,14 +165,9 @@ typedef struct {
 #endif
 
 extern const wpa_crypto_funcs_t g_wifi_default_wpa_crypto_funcs;
+extern uint64_t g_wifi_feature_caps;
 
 #define WIFI_INIT_CONFIG_MAGIC    0x1F2F3F4F
-
-#ifdef CONFIG_ESP32_WIFI_AMPDU_TX_ENABLED
-#define WIFI_DEFAULT_TX_BA_WIN CONFIG_ESP32_WIFI_TX_BA_WIN
-#else
-#define WIFI_DEFAULT_TX_BA_WIN 0 /* unused if ampdu_tx_enable == false */
-#endif
 
 #ifdef CONFIG_ESP32_WIFI_AMPDU_RX_ENABLED
 #define WIFI_DEFAULT_RX_BA_WIN CONFIG_ESP32_WIFI_RX_BA_WIN
@@ -189,8 +193,18 @@ extern const wpa_crypto_funcs_t g_wifi_default_wpa_crypto_funcs;
 #define WIFI_MGMT_SBUF_NUM 32
 #endif
 
+#if CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE
+#define WIFI_STA_DISCONNECTED_PM_ENABLED true
+#else
+#define WIFI_STA_DISCONNECTED_PM_ENABLED false
+#endif
+
+#define CONFIG_FEATURE_WPA3_SAE_BIT     (1<<0)
+#define CONFIG_FEATURE_CACHE_TX_BUF_BIT (1<<1)
+#define CONFIG_FEATURE_FTM_INITIATOR_BIT (1<<2)
+#define CONFIG_FEATURE_FTM_RESPONDER_BIT (1<<3)
+
 #define WIFI_INIT_CONFIG_DEFAULT() { \
-    .event_handler = &esp_event_send, \
     .osi_funcs = &g_wifi_osi_funcs, \
     .wpa_crypto_funcs = g_wifi_default_wpa_crypto_funcs, \
     .static_rx_buf_num = CONFIG_ESP32_WIFI_STATIC_RX_BUFFER_NUM,\
@@ -198,32 +212,35 @@ extern const wpa_crypto_funcs_t g_wifi_default_wpa_crypto_funcs;
     .tx_buf_type = CONFIG_ESP32_WIFI_TX_BUFFER_TYPE,\
     .static_tx_buf_num = WIFI_STATIC_TX_BUFFER_NUM,\
     .dynamic_tx_buf_num = WIFI_DYNAMIC_TX_BUFFER_NUM,\
+    .cache_tx_buf_num = WIFI_CACHE_TX_BUFFER_NUM,\
     .csi_enable = WIFI_CSI_ENABLED,\
     .ampdu_rx_enable = WIFI_AMPDU_RX_ENABLED,\
     .ampdu_tx_enable = WIFI_AMPDU_TX_ENABLED,\
+    .amsdu_tx_enable = WIFI_AMSDU_TX_ENABLED,\
     .nvs_enable = WIFI_NVS_ENABLED,\
     .nano_enable = WIFI_NANO_FORMAT_ENABLED,\
-    .tx_ba_win = WIFI_DEFAULT_TX_BA_WIN,\
     .rx_ba_win = WIFI_DEFAULT_RX_BA_WIN,\
     .wifi_task_core_id = WIFI_TASK_CORE_ID,\
     .beacon_max_len = WIFI_SOFTAP_BEACON_MAX_LEN, \
     .mgmt_sbuf_num = WIFI_MGMT_SBUF_NUM, \
+    .feature_caps = g_wifi_feature_caps, \
+    .sta_disconnected_pm = WIFI_STA_DISCONNECTED_PM_ENABLED,  \
     .magic = WIFI_INIT_CONFIG_MAGIC\
-};
+}
 
 /**
-  * @brief  Init WiFi
-  *         Alloc resource for WiFi driver, such as WiFi control structure, RX/TX buffer,
-  *         WiFi NVS structure etc, this WiFi also start WiFi task
+  * @brief  Initialize WiFi
+  *         Allocate resource for WiFi driver, such as WiFi control structure, RX/TX buffer,
+  *         WiFi NVS structure etc. This WiFi also starts WiFi task
   *
   * @attention 1. This API must be called before all other WiFi API can be called
-  * @attention 2. Always use WIFI_INIT_CONFIG_DEFAULT macro to init the config to default values, this can
-  *               guarantee all the fields got correct value when more fields are added into wifi_init_config_t
-  *               in future release. If you want to set your owner initial values, overwrite the default values
-  *               which are set by WIFI_INIT_CONFIG_DEFAULT, please be notified that the field 'magic' of 
+  * @attention 2. Always use WIFI_INIT_CONFIG_DEFAULT macro to initialize the configuration to default values, this can
+  *               guarantee all the fields get correct value when more fields are added into wifi_init_config_t
+  *               in future release. If you want to set your own initial values, overwrite the default values
+  *               which are set by WIFI_INIT_CONFIG_DEFAULT. Please be notified that the field 'magic' of
   *               wifi_init_config_t should always be WIFI_INIT_CONFIG_MAGIC!
   *
-  * @param  config pointer to WiFi init configuration structure; can point to a temporary variable.
+  * @param  config pointer to WiFi initialized configuration structure; can point to a temporary variable.
   *
   * @return
   *    - ESP_OK: succeed
@@ -238,7 +255,7 @@ esp_err_t esp_wifi_init(const wifi_init_config_t *config);
   *
   * @attention 1. This API should be called if you want to remove WiFi driver from the system
   *
-  * @return 
+  * @return
   *    - ESP_OK: succeed
   *    - ESP_ERR_WIFI_NOT_INIT: WiFi is not initialized by esp_wifi_init
   */
@@ -248,7 +265,7 @@ esp_err_t esp_wifi_deinit(void);
   * @brief     Set the WiFi operating mode
   *
   *            Set the WiFi operating mode as station, soft-AP or station+soft-AP,
-  *            The default mode is soft-AP mode.
+  *            The default mode is station mode.
   *
   * @param     mode  WiFi operating mode
   *
@@ -304,7 +321,7 @@ esp_err_t esp_wifi_stop(void);
  * @brief  Restore WiFi stack persistent settings to default values
  *
  * This function will reset settings made using the following APIs:
- * - esp_wifi_get_auto_connect,
+ * - esp_wifi_set_bandwidth,
  * - esp_wifi_set_protocol,
  * - esp_wifi_set_config related
  * - esp_wifi_set_mode
@@ -323,14 +340,14 @@ esp_err_t esp_wifi_restore(void);
   * @attention 3. The scanning triggered by esp_wifi_start_scan() will not be effective until connection between ESP32 and the AP is established.
   *               If ESP32 is scanning and connecting at the same time, ESP32 will abort scanning and return a warning message and error
   *               number ESP_ERR_WIFI_STATE.
-  *               If you want to do reconnection after ESP32 received disconnect event, remember to add the maximum retry time, otherwise the called	
+  *               If you want to do reconnection after ESP32 received disconnect event, remember to add the maximum retry time, otherwise the called
   *               scan will not work. This is especially true when the AP doesn't exist, and you still try reconnection after ESP32 received disconnect
   *               event with the reason code WIFI_REASON_NO_AP_FOUND.
-  *   
-  * @return 
+  *
+  * @return
   *    - ESP_OK: succeed
   *    - ESP_ERR_WIFI_NOT_INIT: WiFi is not initialized by esp_wifi_init
-  *    - ESP_ERR_WIFI_NOT_START: WiFi is not started by esp_wifi_start
+  *    - ESP_ERR_WIFI_NOT_STARTED: WiFi is not started by esp_wifi_start
   *    - ESP_ERR_WIFI_CONN: WiFi internal error, station or soft-AP control block wrong
   *    - ESP_ERR_WIFI_SSID: SSID of AP which station connects is invalid
   */
@@ -422,7 +439,7 @@ esp_err_t esp_wifi_scan_get_ap_num(uint16_t *number);
 /**
   * @brief     Get AP list found in last scan
   *
-  * @param[inout]  number As input param, it stores max AP number ap_records can hold. 
+  * @param[inout]  number As input param, it stores max AP number ap_records can hold.
   *                As output param, it receives the actual AP number this API returns.
   * @param         ap_records  wifi_ap_record_t array to hold the found APs
   *
@@ -439,6 +456,8 @@ esp_err_t esp_wifi_scan_get_ap_records(uint16_t *number, wifi_ap_record_t *ap_re
 /**
   * @brief     Get information of AP which the ESP32 station is associated with
   *
+  * @attention When the obtained country information is empty, it means that the AP does not carry country information
+  *
   * @param     ap_info  the wifi_ap_record_t to hold AP information
   *            sta can get the connected ap's phy mode info through the struct member
   *            phy_11b，phy_11g，phy_11n，phy_lr in the wifi_ap_record_t struct.
@@ -447,7 +466,7 @@ esp_err_t esp_wifi_scan_get_ap_records(uint16_t *number, wifi_ap_record_t *ap_re
   * @return
   *    - ESP_OK: succeed
   *    - ESP_ERR_WIFI_CONN: The station interface don't initialized
-  *    - ESP_ERR_WIFI_NOT_CONNECT: The station is in disconnect status 
+  *    - ESP_ERR_WIFI_NOT_CONNECT: The station is in disconnect status
   */
 esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap_info);
 
@@ -477,7 +496,7 @@ esp_err_t esp_wifi_get_ps(wifi_ps_type_t *type);
   * @brief     Set protocol type of specified interface
   *            The default protocol is (WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N)
   *
-  * @attention Currently we only support 802.11b or 802.11bg or 802.11bgn mode
+  * @attention Support 802.11b or 802.11bg or 802.11bgn or LR mode
   *
   * @param     ifx  interfaces
   * @param     protocol_bitmap  WiFi protocol bitmap
@@ -542,8 +561,10 @@ esp_err_t esp_wifi_get_bandwidth(wifi_interface_t ifx, wifi_bandwidth_t *bw);
 /**
   * @brief     Set primary/secondary channel of ESP32
   *
-  * @attention 1. This is a special API for sniffer
-  * @attention 2. This API should be called after esp_wifi_start() and esp_wifi_set_promiscuous()
+  * @attention 1. This API should be called after esp_wifi_start()
+  * @attention 2. When ESP32 is in STA mode, this API should not be called when STA is scanning or connecting to an external AP
+  * @attention 3. When ESP32 is in softAP mode, this API should not be called when softAP has connected to external STAs
+  * @attention 4. When ESP32 is in STA+softAP mode, this API should not be called when in the scenarios described above
   *
   * @param     primary  for HT20, primary is the channel number, for HT40, primary is the primary channel
   * @param     second   for HT20, second is ignored, for HT40, second is the second channel
@@ -574,19 +595,22 @@ esp_err_t esp_wifi_get_channel(uint8_t *primary, wifi_second_chan_t *second);
 /**
   * @brief     configure country info
   *
-  * @attention 1. The default country is {.cc="CN", .schan=1, .nchan=13, policy=WIFI_COUNTRY_POLICY_AUTO}
-  * @attention 2. When the country policy is WIFI_COUNTRY_POLICY_AUTO, the country info of the AP to which
+  * @attention 1. It is discouraged to call this API since this doesn't validate the per-country rules,
+  *               it's up to the user to fill in all fields according to local regulations.
+  *               Please use esp_wifi_set_country_code instead.
+  * @attention 2. The default country is CHINA {.cc="CN", .schan=1, .nchan=13, policy=WIFI_COUNTRY_POLICY_AUTO}
+  * @attention 3. When the country policy is WIFI_COUNTRY_POLICY_AUTO, the country info of the AP to which
   *               the station is connected is used. E.g. if the configured country info is {.cc="USA", .schan=1, .nchan=11}
   *               and the country info of the AP to which the station is connected is {.cc="JP", .schan=1, .nchan=14}
   *               then the country info that will be used is {.cc="JP", .schan=1, .nchan=14}. If the station disconnected
-  *               from the AP the country info is set back back to the country info of the station automatically,
+  *               from the AP the country info is set back to the country info of the station automatically,
   *               {.cc="US", .schan=1, .nchan=11} in the example.
-  * @attention 3. When the country policy is WIFI_COUNTRY_POLICY_MANUAL, always use the configured country info.
-  * @attention 4. When the country info is changed because of configuration or because the station connects to a different
-  *               external AP, the country IE in probe response/beacon of the soft-AP is changed also.
-  * @attention 5. The country configuration is not stored into flash
-  * @attention 6. This API doesn't validate the per-country rules, it's up to the user to fill in all fields according to 
-  *               local regulations.
+  * @attention 4. When the country policy is WIFI_COUNTRY_POLICY_MANUAL, then the configured country info is used always.
+  * @attention 5. When the country info is changed because of configuration or because the station connects to a different
+  *               external AP, the country IE in probe response/beacon of the soft-AP is also changed.
+  * @attention 6. The country configuration is stored into flash.
+  * @attention 7. When this API is called, the PHY init data will switch to the PHY init data type corresponding to the
+  *               country info.
   *
   * @param     country   the configured country info
   *
@@ -647,7 +671,7 @@ esp_err_t esp_wifi_set_mac(wifi_interface_t ifx, const uint8_t mac[6]);
 esp_err_t esp_wifi_get_mac(wifi_interface_t ifx, uint8_t mac[6]);
 
 /**
-  * @brief The RX callback function in the promiscuous mode. 
+  * @brief The RX callback function in the promiscuous mode.
   *        Each time a packet is received, the callback function will be called.
   *
   * @param buf  Data received. Type of data in buffer (wifi_promiscuous_pkt_t or wifi_pkt_rx_ctrl_t) indicated by 'type' parameter.
@@ -798,6 +822,21 @@ esp_err_t esp_wifi_get_config(wifi_interface_t interface, wifi_config_t *conf);
   */
 esp_err_t esp_wifi_ap_get_sta_list(wifi_sta_list_t *sta);
 
+/**
+  * @brief     Get AID of STA connected with soft-AP
+  *
+  * @param     mac  STA's mac address
+  * @param[out]  aid  Store the AID corresponding to STA mac
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - ESP_ERR_WIFI_NOT_INIT: WiFi is not initialized by esp_wifi_init
+  *    - ESP_ERR_INVALID_ARG: invalid argument
+  *    - ESP_ERR_NOT_FOUND: Requested resource not found
+  *    - ESP_ERR_WIFI_MODE: WiFi mode is wrong
+  *    - ESP_ERR_WIFI_CONN: WiFi internal error, the station/soft-AP control block is invalid
+  */
+esp_err_t esp_wifi_ap_get_sta_aid(const uint8_t mac[6], uint16_t *aid);
 
 /**
   * @brief     Set the WiFi API configuration storage type
@@ -854,28 +893,35 @@ esp_err_t esp_wifi_set_vendor_ie(bool enable, wifi_vendor_ie_type_t type, wifi_v
 esp_err_t esp_wifi_set_vendor_ie_cb(esp_vendor_ie_cb_t cb, void *ctx);
 
 /**
-  * @brief     Set maximum WiFi transmitting power
+  * @brief     Set maximum transmitting power after WiFi start.
   *
-  * @param     power  Maximum WiFi transmitting power, unit is 0.25dBm, range is [40, 82] corresponding to 10dBm - 20.5dBm here.
+  * @attention 1. Maximum power before wifi startup is limited by PHY init data bin.
+  * @attention 2. The value set by this API will be mapped to the max_tx_power of the structure wifi_country_t variable.
+  * @attention 3. Mapping Table {Power, max_tx_power} = {{8,   2}, {20,  5}, {28,  7}, {34,  8}, {44, 11},
+  *                                                      {52, 13}, {56, 14}, {60, 15}, {66, 16}, {72, 18}, {80, 20}}.
+  * @attention 4. Param power unit is 0.25dBm, range is [8, 84] corresponding to 2dBm - 20dBm.
+  * @attention 5. Relationship between set value and actual value. As follows: {set value range, actual value} = {{[8,  19],8}, {[20, 27],20}, {[28, 33],28}, {[34, 43],34}, {[44, 51],44}, {[52, 55],52}, {[56, 59],56}, {[60, 65],60}, {[66, 71],66}, {[72, 79],72}, {[80, 84],80}}.
+  *
+  * @param     power  Maximum WiFi transmitting power.
   *
   * @return
   *    - ESP_OK: succeed
   *    - ESP_ERR_WIFI_NOT_INIT: WiFi is not initialized by esp_wifi_init
   *    - ESP_ERR_WIFI_NOT_START: WiFi is not started by esp_wifi_start
-  *    - ESP_ERR_WIFI_NOT_ARG: invalid argument
+  *    - ESP_ERR_WIFI_ARG: invalid argument, e.g. parameter is out of range
   */
 esp_err_t esp_wifi_set_max_tx_power(int8_t power);
 
 /**
-  * @brief     Get maximum WiFi transmiting power
+  * @brief     Get maximum transmiting power after WiFi start
   *
-  * @param     power  Maximum WiFi transmitting power, unit is 0.25dBm.
+  * @param     power Maximum WiFi transmitting power, unit is 0.25dBm.
   *
   * @return
   *    - ESP_OK: succeed
   *    - ESP_ERR_WIFI_NOT_INIT: WiFi is not initialized by esp_wifi_init
   *    - ESP_ERR_WIFI_NOT_START: WiFi is not started by esp_wifi_start
-  *    - ESP_ERR_INVALID_ARG: invalid argument
+  *    - ESP_ERR_WIFI_ARG: invalid argument
   */
 esp_err_t esp_wifi_get_max_tx_power(int8_t *power);
 
@@ -913,14 +959,14 @@ esp_err_t esp_wifi_get_event_mask(uint32_t *mask);
   *
   * @attention Currently only support for sending beacon/probe request/probe response/action and non-QoS
   *            data frame
-  * 
+  *
   * @param     ifx interface if the Wi-Fi mode is Station, the ifx should be WIFI_IF_STA. If the Wi-Fi
-  *            mode is SoftAP, the ifx should be WIFI_IF_AP. If the Wi-Fi mode is Station+SoftAP, the 
+  *            mode is SoftAP, the ifx should be WIFI_IF_AP. If the Wi-Fi mode is Station+SoftAP, the
   *            ifx should be WIFI_IF_STA or WIFI_IF_AP. If the ifx is wrong, the API returns ESP_ERR_WIFI_IF.
   * @param     buffer raw ieee80211 buffer
   * @param     len the length of raw buffer, the len must be <= 1500 Bytes and >= 24 Bytes
-  * @param     en_sys_seq indicate whether use the internal sequence number. If en_sys_seq is false, the 
-  *            sequence in raw buffer is unchanged, otherwise it will be overwritten by WiFi driver with 
+  * @param     en_sys_seq indicate whether use the internal sequence number. If en_sys_seq is false, the
+  *            sequence in raw buffer is unchanged, otherwise it will be overwritten by WiFi driver with
   *            the system sequence number.
   *            Generally, if esp_wifi_80211_tx is called before the Wi-Fi connection has been set up, both
   *            en_sys_seq==true and en_sys_seq==false are fine. However, if the API is called after the Wi-Fi
@@ -936,12 +982,12 @@ esp_err_t esp_wifi_get_event_mask(uint32_t *mask);
 esp_err_t esp_wifi_80211_tx(wifi_interface_t ifx, const void *buffer, int len, bool en_sys_seq);
 
 /**
-  * @brief The RX callback function of Channel State Information(CSI)  data. 
+  * @brief The RX callback function of Channel State Information(CSI)  data.
   *
   *        Each time a CSI data is received, the callback function will be called.
   *
-  * @param ctx context argument, passed to esp_wifi_set_csi_rx_cb() when registering callback function. 
-  * @param data CSI data received. The memory that it points to will be deallocated after callback function returns. 
+  * @param ctx context argument, passed to esp_wifi_set_csi_rx_cb() when registering callback function.
+  * @param data CSI data received. The memory that it points to will be deallocated after callback function returns.
   *
   */
 typedef void (* wifi_csi_cb_t)(void *ctx, wifi_csi_info_t *data);
@@ -966,7 +1012,7 @@ esp_err_t esp_wifi_set_csi_rx_cb(wifi_csi_cb_t cb, void *ctx);
   * @brief Set CSI data configuration
   *
   * @param config configuration
-  * 
+  *
   * return
   *    - ESP_OK: succeed
   *    - ESP_ERR_WIFI_NOT_INIT: WiFi is not initialized by esp_wifi_init
@@ -1036,6 +1082,216 @@ esp_err_t esp_wifi_set_ant(const wifi_ant_config_t *config);
   *    - ESP_ERR_WIFI_ARG: invalid argument, e.g. parameter is NULL
   */
 esp_err_t esp_wifi_get_ant(wifi_ant_config_t *config);
+
+/**
+ * @brief      Get the TSF time
+ *             In Station mode or SoftAP+Station mode if station is not connected or station doesn't receive at least
+ *             one beacon after connected, will return 0
+ *
+ * @attention  Enabling power save may cause the return value inaccurate, except WiFi modem sleep
+ *
+ * @param      interface The interface whose tsf_time is to be retrieved.
+ *
+ * @return     0 or the TSF time
+ */
+int64_t esp_wifi_get_tsf_time(wifi_interface_t interface);
+
+/**
+  * @brief     Set the inactive time of the ESP32 STA or AP
+  *
+  * @attention 1. For Station, If the station does not receive a beacon frame from the connected SoftAP during the inactive time,
+  *               disconnect from SoftAP. Default 6s.
+  * @attention 2. For SoftAP, If the softAP doesn't receive any data from the connected STA during inactive time,
+  *               the softAP will force deauth the STA. Default is 300s.
+  * @attention 3. The inactive time configuration is not stored into flash
+  *
+  * @param     ifx  interface to be configured.
+  * @param     sec  Inactive time. Unit seconds.
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - ESP_ERR_WIFI_NOT_INIT: WiFi is not initialized by esp_wifi_init
+  *    - ESP_ERR_WIFI_NOT_STARTED: WiFi is not started by esp_wifi_start
+  *    - ESP_ERR_WIFI_ARG: invalid argument, For Station, if sec is less than 3. For SoftAP, if sec is less than 10.
+  */
+esp_err_t esp_wifi_set_inactive_time(wifi_interface_t ifx, uint16_t sec);
+
+/**
+  * @brief     Get inactive time of specified interface
+  *
+  * @param     ifx  Interface to be configured.
+  * @param     sec  Inactive time. Unit seconds.
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - ESP_ERR_WIFI_NOT_INIT: WiFi is not initialized by esp_wifi_init
+  *    - ESP_ERR_WIFI_ARG: invalid argument
+  */
+esp_err_t esp_wifi_get_inactive_time(wifi_interface_t ifx, uint16_t *sec);
+
+/**
+  * @brief     Dump WiFi statistics
+  *
+  * @param     modules statistic modules to be dumped
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - others: failed
+  */
+esp_err_t esp_wifi_statis_dump(uint32_t modules);
+
+/**
+  * @brief      Set RSSI threshold below which APP will get an event
+  *
+  * @attention  This API needs to be called every time after WIFI_EVENT_STA_BSS_RSSI_LOW event is received.
+  *
+  * @param      rssi threshold value in dbm between -100 to 0
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - ESP_ERR_WIFI_NOT_INIT: WiFi is not initialized by esp_wifi_init
+  *    - ESP_ERR_WIFI_ARG: invalid argument
+  */
+esp_err_t esp_wifi_set_rssi_threshold(int32_t rssi);
+
+/**
+  * @brief      Start an FTM Initiator session by sending FTM request
+  *             If successful, event WIFI_EVENT_FTM_REPORT is generated with the result of the FTM procedure
+  *
+  * @attention  Use this API only in Station mode
+  *
+  * @param      cfg  FTM Initiator session configuration
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - others: failed
+  */
+esp_err_t esp_wifi_ftm_initiate_session(wifi_ftm_initiator_cfg_t *cfg);
+
+/**
+  * @brief      End the ongoing FTM Initiator session
+  *
+  * @attention  This API works only on FTM Initiator
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - others: failed
+  */
+esp_err_t esp_wifi_ftm_end_session(void);
+
+/**
+  * @brief      Set offset in cm for FTM Responder. An equivalent offset is calculated in picoseconds
+  *             and added in TOD of FTM Measurement frame (T1).
+  *
+  * @attention  Use this API only in AP mode before performing FTM as responder
+  *
+  * @param      offset_cm  T1 Offset to be added in centimeters
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - others: failed
+  */
+esp_err_t esp_wifi_ftm_resp_set_offset(int16_t offset_cm);
+
+/**
+  * @brief      Enable or disable 11b rate of specified interface
+  *
+  * @attention  1. This API should be called after esp_wifi_init() and before esp_wifi_start().
+  * @attention  2. Only when really need to disable 11b rate call this API otherwise don't call this.
+  *
+  * @param      ifx  Interface to be configured.
+  * @param      disable true means disable 11b rate while false means enable 11b rate.
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - others: failed
+  */
+esp_err_t esp_wifi_config_11b_rate(wifi_interface_t ifx, bool disable);
+
+/**
+  * @brief      Set wake interval for connectionless modules to wake up periodically.
+  *
+  * @attention 1. Only one wake interval for all connectionless modules.
+  * @attention 2. This configuration could work at connected status.
+  *               When ESP_WIFI_STA_DISCONNECTED_PM_ENABLE is enabled, this configuration could work at disconnected status.
+  * @attention 3. Event WIFI_EVENT_CONNECTIONLESS_MODULE_WAKE_INTERVAL_START would be posted each time wake interval starts.
+  * @attention 4. Recommend to configure interval in multiples of hundred. (e.g. 100ms)
+  *
+  * @param      wake_interval  Milliseconds after would the chip wake up, from 1 to 65535.
+  */
+esp_err_t esp_wifi_connectionless_module_set_wake_interval(uint16_t wake_interval);
+
+/**
+  * @brief     configure country
+  *
+  * @attention 1. When ieee80211d_enabled, the country info of the AP to which
+  *               the station is connected is used. E.g. if the configured country is US
+  *               and the country info of the AP to which the station is connected is JP
+  *               then the country info that will be used is JP. If the station disconnected
+  *               from the AP the country info is set back to the country info of the station automatically,
+  *               US in the example.
+  * @attention 2. When ieee80211d_enabled is disabled, then the configured country info is used always.
+  * @attention 3. When the country info is changed because of configuration or because the station connects to a different
+  *               external AP, the country IE in probe response/beacon of the soft-AP is also changed.
+  * @attention 4. The country configuration is stored into flash.
+  * @attention 5. When this API is called, the PHY init data will switch to the PHY init data type corresponding to the
+  *               country info.
+  * @attention 6. Supported country codes are "01"(world safe mode) "AT","AU","BE","BG","BR",
+  *               "CA","CH","CN","CY","CZ","DE","DK","EE","ES","FI","FR","GB","GR","HK","HR","HU",
+  *               "IE","IN","IS","IT","JP","KR","LI","LT","LU","LV","MT","MX","NL","NO","NZ","PL","PT",
+  *               "RO","SE","SI","SK","TW","US"
+  *
+  * @attention 7. When country code "01" (world safe mode) is set, SoftAP mode won't contain country IE.
+  * @attention 8. The default country is "CN" and ieee80211d_enabled is TRUE.
+  *
+  * @param     country   the configured country ISO code
+  * @param     ieee80211d_enabled   802.11d is enabled or not
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - ESP_ERR_WIFI_NOT_INIT: WiFi is not initialized by esp_wifi_init
+  *    - ESP_ERR_INVALID_ARG: invalid argument
+  */
+esp_err_t esp_wifi_set_country_code(const char *country, bool ieee80211d_enabled);
+
+/**
+  * @brief     get the current country code
+  *
+  * @param     country  country code
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - ESP_ERR_WIFI_NOT_INIT: WiFi is not initialized by esp_wifi_init
+  *    - ESP_ERR_INVALID_ARG: invalid argument
+  */
+esp_err_t esp_wifi_get_country_code(char *country);
+
+/**
+  * @brief      Config 80211 tx rate of specified interface
+  *
+  * @attention  1. This API should be called after esp_wifi_init() and before esp_wifi_start().
+  *
+  * @param      ifx  Interface to be configured.
+  * @param      rate Phy rate to be configured.
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - others: failed
+  */
+esp_err_t esp_wifi_config_80211_tx_rate(wifi_interface_t ifx, wifi_phy_rate_t rate);
+
+/**
+  * @brief      Disable PMF configuration for specified interface
+  *
+  * @attention  This API should be called after esp_wifi_set_config() and before esp_wifi_start().
+  *
+  * @param      ifx  Interface to be configured.
+  *
+  * @return
+  *    - ESP_OK: succeed
+  *    - others: failed
+  */
+esp_err_t esp_wifi_disable_pmf_config(wifi_interface_t ifx);
 
 #ifdef __cplusplus
 }

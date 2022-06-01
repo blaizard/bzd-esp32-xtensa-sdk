@@ -1,21 +1,13 @@
-// Copyright 2015-2019 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * SPDX-FileCopyrightText: 2015-2022 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 /*******************************************************************************
  * NOTICE
  * The ll is not public api, don't use in application code.
- * See readme.md in soc/include/hal/readme.md
+ * See readme.md in hal/include/hal/readme.md
  ******************************************************************************/
 
 // The Lowlevel layer for SPI Flash
@@ -24,26 +16,37 @@
 
 #include <stdlib.h>
 #include "soc/spi_periph.h"
+#include "soc/spi_struct.h"
 #include "hal/spi_types.h"
 #include "hal/spi_flash_types.h"
 #include <sys/param.h> // For MIN/MAX
 #include <stdbool.h>
 #include <string.h>
+#include "hal/misc.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-//Supported clock register values
-#define SPI_FLASH_LL_CLKREG_VAL_5MHZ    ((spi_flash_ll_clock_reg_t){.val=0x0000F1CF})   ///< Clock set to 5 MHz
-#define SPI_FLASH_LL_CLKREG_VAL_10MHZ   ((spi_flash_ll_clock_reg_t){.val=0x000070C7})   ///< Clock set to 10 MHz
-#define SPI_FLASH_LL_CLKREG_VAL_20MHZ   ((spi_flash_ll_clock_reg_t){.val=0x00003043})   ///< Clock set to 20 MHz
-#define SPI_FLASH_LL_CLKREG_VAL_26MHZ   ((spi_flash_ll_clock_reg_t){.val=0x00002002})   ///< Clock set to 26 MHz
-#define SPI_FLASH_LL_CLKREG_VAL_40MHZ   ((spi_flash_ll_clock_reg_t){.val=0x00001001})   ///< Clock set to 40 MHz
-#define SPI_FLASH_LL_CLKREG_VAL_80MHZ   ((spi_flash_ll_clock_reg_t){.val=0x80000000})   ///< Clock set to 80 MHz
+#define SPI_FLASH_LL_CLOCK_FREQUENCY_MHZ (80)
 
 /// Get the start address of SPI peripheral registers by the host ID
-#define spi_flash_ll_get_hw(host_id)  ((host_id)==SPI1_HOST? &SPI1:((host_id)==SPI2_HOST?&SPI2:((host_id)==SPI3_HOST?&SPI3:({abort();(spi_dev_t*)0;}))))
+#define spi_flash_ll_get_hw(host_id) ( ((host_id)==SPI1_HOST) ? &SPI1 :(\
+                                       ((host_id)==SPI2_HOST) ? &SPI2 :(\
+                                       ((host_id)==SPI3_HOST) ? &SPI3 :(\
+                                       {abort();(spi_dev_t*)0;}\
+                                     ))) )
+#define spi_flash_ll_hw_get_id(dev) ( ((dev) == &SPI1) ? SPI1_HOST :(\
+                                      ((dev) == &SPI2) ? SPI2_HOST :(\
+                                      ((dev) == &SPI3) ? SPI3_HOST :(\
+                                      -1\
+                                    ))) )
+
+/// Empty function to be compatible with new version chips.
+#define spi_flash_ll_set_dummy_out(dev, out_en, out_lev)
 
 /// type to store pre-calculated register value in above layers
-typedef typeof(SPI1.clock) spi_flash_ll_clock_reg_t;
+typedef typeof(SPI1.clock.val) spi_flash_ll_clock_reg_t;
 
 /*------------------------------------------------------------------------------
  * Control
@@ -132,7 +135,7 @@ static inline void spi_flash_ll_get_buffer_data(spi_dev_t *dev, void *buffer, ui
     } else {
         // Otherwise, slow(er) path copies word by word
         int copy_len = read_len;
-        for (int i = 0; i < (read_len + 3) / 4; i++) {
+        for (size_t i = 0; i < (read_len + 3) / 4; i++) {
             int word_len = MIN(sizeof(uint32_t), copy_len);
             uint32_t word = dev->data_buf[i];
             memcpy(buffer, &word, word_len);
@@ -154,6 +157,27 @@ static inline void spi_flash_ll_write_word(spi_dev_t *dev, uint32_t word)
 }
 
 /**
+ * Set the data to be written in the data buffer.
+ *
+ * @param dev Beginning address of the peripheral registers.
+ * @param buffer Buffer holding the data
+ * @param length Length of data in bytes.
+ */
+static inline void spi_flash_ll_set_buffer_data(spi_dev_t *dev, const void *buffer, uint32_t length)
+{
+    // Load data registers, word at a time
+    int num_words = (length + 3) >> 2;
+    for (int i = 0; i < num_words; i++) {
+        uint32_t word = 0;
+        uint32_t word_len = MIN(length, sizeof(word));
+        memcpy(&word, buffer, word_len);
+        dev->data_buf[i] = word;
+        length -= word_len;
+        buffer = (void *)((intptr_t)buffer + word_len);
+    }
+}
+
+/**
  * Program a page of the flash chip. Call ``spi_flash_ll_set_address`` before
  * this to set the address to program.
  *
@@ -164,18 +188,7 @@ static inline void spi_flash_ll_write_word(spi_dev_t *dev, uint32_t word)
 static inline void spi_flash_ll_program_page(spi_dev_t *dev, const void *buffer, uint32_t length)
 {
     dev->user.usr_dummy = 0;
-
-    // Load data registers, word at a time
-    int num_words = (length + 3) / 4;
-    for (int i = 0; i < num_words; i++) {
-        uint32_t word = 0;
-        uint32_t word_len = MIN(length, sizeof(word));
-        memcpy(&word, buffer, word_len);
-        dev->data_buf[i] = word;
-        length -= word_len;
-        buffer = (void *)((intptr_t)buffer + word_len);
-    }
-
+    spi_flash_ll_set_buffer_data(dev, buffer, length);
     dev->cmd.flash_pp = 1;
 }
 
@@ -199,7 +212,7 @@ static inline void spi_flash_ll_user_start(spi_dev_t *dev)
  */
 static inline bool spi_flash_ll_host_idle(const spi_dev_t *dev)
 {
-    return dev->ext2.st != 0;
+    return dev->ext2.st == 0;
 }
 
 /*------------------------------------------------------------------------------
@@ -213,9 +226,9 @@ static inline bool spi_flash_ll_host_idle(const spi_dev_t *dev)
  */
 static inline void spi_flash_ll_set_cs_pin(spi_dev_t *dev, int pin)
 {
-    dev->pin.cs0_dis = (pin == 0) ? 0 : 1;
-    dev->pin.cs1_dis = (pin == 1) ? 0 : 1;
-    dev->pin.cs2_dis = (pin == 2) ? 0 : 1;
+    dev->pin.cs0_dis = (pin != 0);
+    dev->pin.cs1_dis = (pin != 1);
+    dev->pin.cs2_dis = (pin != 2);
 }
 
 /**
@@ -262,7 +275,7 @@ static inline void spi_flash_ll_set_read_mode(spi_dev_t *dev, esp_flash_io_mode_
  */
 static inline void spi_flash_ll_set_clock(spi_dev_t *dev, spi_flash_ll_clock_reg_t *clock_val)
 {
-    dev->clock = *clock_val;
+    dev->clock.val = *clock_val;
 }
 
 /**
@@ -291,19 +304,31 @@ static inline void spi_flash_ll_set_mosi_bitlen(spi_dev_t *dev, uint32_t bitlen)
 }
 
 /**
- * Set the command with fixed length (8 bits).
+ * Set the command.
  *
  * @param dev Beginning address of the peripheral registers.
  * @param command Command to send
+ * @param bitlen Length of the command
  */
-static inline void spi_flash_ll_set_command8(spi_dev_t *dev, uint8_t command)
+static inline void spi_flash_ll_set_command(spi_dev_t *dev, uint8_t command, uint32_t bitlen)
 {
     dev->user.usr_command = 1;
     typeof(dev->user2) user2 = {
         .usr_command_value = command,
-        .usr_command_bitlen = (8 - 1),
+        .usr_command_bitlen = (bitlen - 1),
     };
     dev->user2 = user2;
+}
+
+/**
+ * Get the address length that is set in register, in bits.
+ *
+ * @param dev Beginning address of the peripheral registers.
+ *
+ */
+static inline int spi_flash_ll_get_addr_bitlen(spi_dev_t *dev)
+{
+    return dev->user.usr_addr ? dev->user1.usr_addr_bitlen + 1 : 0;
 }
 
 /**
@@ -316,6 +341,24 @@ static inline void spi_flash_ll_set_addr_bitlen(spi_dev_t *dev, uint32_t bitlen)
 {
     dev->user1.usr_addr_bitlen = (bitlen - 1);
     dev->user.usr_addr = bitlen ? 1 : 0;
+}
+
+/**
+ * Set the address to send in user command mode. Should be called before commands that requires the address e.g. erase sector, read, write...
+ *
+ * @param dev Beginning address of the peripheral registers.
+ * @param addr Address to send
+ */
+static inline void spi_flash_ll_set_usr_address(spi_dev_t *dev, uint32_t addr, int bit_len)
+{
+    // The blank region should be all ones
+    if (bit_len >= 32) {
+        dev->addr = addr;
+        dev->slv_wr_status = UINT32_MAX;
+    } else {
+        uint32_t padding_ones = UINT32_MAX >> bit_len;
+        dev->addr = (addr << (32 - bit_len)) | padding_ones;
+    }
 }
 
 /**
@@ -338,5 +381,56 @@ static inline void spi_flash_ll_set_address(spi_dev_t *dev, uint32_t addr)
 static inline void spi_flash_ll_set_dummy(spi_dev_t *dev, uint32_t dummy_n)
 {
     dev->user.usr_dummy = dummy_n ? 1 : 0;
-    dev->user1.usr_dummy_cyclelen = dummy_n - 1;
+    HAL_FORCE_MODIFY_U32_REG_FIELD(dev->user1, usr_dummy_cyclelen, dummy_n - 1);
 }
+
+static inline void spi_flash_ll_set_hold(spi_dev_t *dev, uint32_t hold_n)
+{
+    dev->ctrl2.hold_time = hold_n;
+    dev->user.cs_hold = (hold_n > 0? 1: 0);
+}
+
+static inline void spi_flash_ll_set_cs_setup(spi_dev_t *dev, uint32_t cs_setup_time)
+{
+    dev->user.cs_setup = (cs_setup_time > 0 ? 1 : 0);
+    dev->ctrl2.setup_time = cs_setup_time - 1;
+}
+
+/**
+ * Get the spi flash source clock frequency. Used for calculating
+ * the divider parameters.
+ *
+ * @param host_id SPI host id. Not used in this function, but to keep
+ * compatibility with other targets.
+ *
+ * @return the frequency of spi flash clock source.(MHz)
+ */
+static inline uint32_t spi_flash_ll_get_source_clock_freq_mhz(uint8_t host_id)
+{
+    return SPI_FLASH_LL_CLOCK_FREQUENCY_MHZ;
+}
+
+/**
+ * Calculate spi_flash clock frequency division parameters for register.
+ *
+ * @param host_id SPI host id. Not used in this function, but to keep
+ * compatibility with other targets.
+ * @param clkdiv frequency division factor
+ *
+ * @return Register setting for the given clock division factor.
+ */
+static inline uint32_t spi_flash_ll_calculate_clock_reg(uint8_t host_id, uint8_t clkdiv)
+{
+    uint32_t div_parameter;
+    // See comments of `clock` in `spi_struct.h`
+    if (clkdiv == 1) {
+        div_parameter = (1 << 31);
+    } else {
+        div_parameter = ((clkdiv - 1) | (((clkdiv/2 - 1) & 0xff) << 6 ) | (((clkdiv - 1) & 0xff) << 12));
+    }
+    return div_parameter;
+}
+
+#ifdef __cplusplus
+}
+#endif

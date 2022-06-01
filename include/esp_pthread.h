@@ -1,21 +1,14 @@
-// Copyright 2018 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * SPDX-FileCopyrightText: 2018-2022 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 #pragma once
 
+#include <stdbool.h>
 #include "esp_err.h"
-#include <freertos/FreeRTOSConfig.h>
+#include "freertos/FreeRTOSConfig.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,11 +30,11 @@ typedef struct {
 /**
  * @brief Creates a default pthread configuration based
  * on the values set via menuconfig.
- * 
+ *
  * @return
  *      A default configuration structure.
  */
-esp_pthread_cfg_t esp_pthread_get_default_config();
+esp_pthread_cfg_t esp_pthread_get_default_config(void);
 
 /**
  * @brief Configure parameters for creating pthread
@@ -81,6 +74,11 @@ esp_err_t esp_pthread_set_cfg(const esp_pthread_cfg_t *cfg);
  *      - ESP_ERR_NOT_FOUND if a configuration wasn't previously set
  */
 esp_err_t esp_pthread_get_cfg(esp_pthread_cfg_t *p);
+
+/**
+ * @brief Initialize pthread library
+ */
+esp_err_t esp_pthread_init(void);
 
 #ifdef __cplusplus
 }

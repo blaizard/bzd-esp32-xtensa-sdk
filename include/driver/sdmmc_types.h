@@ -1,6 +1,12 @@
 /*
+ * SPDX-FileCopyrightText: 2006 Uwe Stuehler <uwe@openbsd.org>
+ *
+ * SPDX-License-Identifier: ISC
+ *
+ * SPDX-FileContributor: 2016-2021 Espressif Systems (Shanghai) CO LTD
+ */
+/*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
- * Adaptations to ESP-IDF Copyright (c) 2016 Espressif Systems (Shanghai) PTE LTD
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -50,17 +56,35 @@ typedef struct {
 
 /**
  * Decoded values from SD Configuration Register
+ * Note: When new member is added, update reserved bits accordingly
  */
 typedef struct {
-    int sd_spec;    /*!< SD Physical layer specification version, reported by card */
-    int bus_width;  /*!< bus widths supported by card: BIT(0) — 1-bit bus, BIT(2) — 4-bit bus */
+    uint32_t sd_spec: 4;            /*!< SD Physical layer specification version, reported by card */
+    uint32_t erase_mem_state: 1;    /*!< data state on card after erase whether 0 or 1 (card vendor dependent) */
+    uint32_t bus_width: 4;          /*!< bus widths supported by card: BIT(0) — 1-bit bus, BIT(2) — 4-bit bus */
+    uint32_t reserved: 23;          /*!< reserved for future expansion */
+    uint32_t rsvd_mnf;              /*!< reserved for manufacturer usage */
 } sdmmc_scr_t;
+
+/**
+ * Decoded values from SD Status Register
+ * Note: When new member is added, update reserved bits accordingly
+ */
+typedef struct {
+    uint32_t cur_bus_width: 2;      /*!< SD current bus width */
+    uint32_t discard_support: 1;    /*!< SD discard feature support */
+    uint32_t fule_support: 1;       /*!< SD FULE (Full User Area Logical Erase) feature support */
+    uint32_t reserved: 28;          /*!< reserved for future expansion */
+} sdmmc_ssr_t;
 
 /**
  * Decoded values of Extended Card Specific Data
  */
 typedef struct {
-    uint8_t power_class;    /*!< Power class used by the card */
+    uint8_t rev;                /*!< Extended CSD Revision */
+    uint8_t power_class;        /*!< Power class used by the card */
+    uint8_t erase_mem_state;    /*!< data state on card after erase whether 0 or 1 (card vendor dependent) */
+    uint8_t sec_feature;        /*!< secure data management features supported by the card */
 } sdmmc_ext_csd_t;
 
 /**
@@ -114,7 +138,7 @@ typedef struct {
 #define SCF_WAIT_BUSY    0x2000     /*!< Wait for completion of card busy signal before returning */
 /** @endcond */
         esp_err_t error;            /*!< error returned from transfer */
-        int timeout_ms;             /*!< response timeout, in milliseconds */
+        uint32_t timeout_ms;        /*!< response timeout, in milliseconds */
 } sdmmc_command_t;
 
 /**
@@ -130,6 +154,7 @@ typedef struct {
 #define SDMMC_HOST_FLAG_8BIT    BIT(2)      /*!< host supports 8-line MMC protocol */
 #define SDMMC_HOST_FLAG_SPI     BIT(3)      /*!< host supports SPI protocol */
 #define SDMMC_HOST_FLAG_DDR     BIT(4)      /*!< host supports DDR mode for SD/MMC */
+#define SDMMC_HOST_FLAG_DEINIT_ARG BIT(5)      /*!< host `deinit` function called with the slot argument */
     int slot;                   /*!< slot number, to be passed to host functions */
     int max_freq_khz;           /*!< max frequency supported by the host */
 #define SDMMC_FREQ_DEFAULT      20000       /*!< SD/MMC Default speed (limited by clock divider) */
@@ -144,7 +169,10 @@ typedef struct {
     esp_err_t (*set_bus_ddr_mode)(int slot, bool ddr_enable); /*!< host function to set DDR mode */
     esp_err_t (*set_card_clk)(int slot, uint32_t freq_khz); /*!< host function to set card clock frequency */
     esp_err_t (*do_transaction)(int slot, sdmmc_command_t* cmdinfo);    /*!< host function to do a transaction */
-    esp_err_t (*deinit)(void);  /*!< host function to deinitialize the driver */
+    union {
+        esp_err_t (*deinit)(void);  /*!< host function to deinitialize the driver */
+        esp_err_t (*deinit_p)(int slot);  /*!< host function to deinitialize the driver, called with the `slot` */
+    };
     esp_err_t (*io_int_enable)(int slot); /*!< Host function to enable SDIO interrupt line */
     esp_err_t (*io_int_wait)(int slot, TickType_t timeout_ticks); /*!< Host function to wait for SDIO interrupt line to be active */
     int command_timeout_ms;     /*!< timeout, in milliseconds, of a single command. Set to 0 to use the default value. */
@@ -163,6 +191,7 @@ typedef struct {
     };
     sdmmc_csd_t csd;            /*!< decoded CSD (Card-Specific Data) register value */
     sdmmc_scr_t scr;            /*!< decoded SCR (SD card Configuration Register) value */
+    sdmmc_ssr_t ssr;            /*!< decoded SSR (SD Status Register) value */
     sdmmc_ext_csd_t ext_csd;    /*!< decoded EXT_CSD (Extended Card Specific Data) register value */
     uint16_t rca;               /*!< RCA (Relative Card Address) */
     uint16_t max_freq_khz;      /*!< Maximum frequency, in kHz, supported by the card */
@@ -175,5 +204,28 @@ typedef struct {
     uint32_t reserved : 23;     /*!< Reserved for future expansion */
 } sdmmc_card_t;
 
+/**
+ * SD/MMC erase command(38) arguments
+ * SD:
+ *  ERASE: Erase the write blocks, physical/hard erase.
+ *
+ *  DISCARD: Card may deallocate the discarded blocks partially or completely.
+ *  After discard operation the previously written data may be partially or
+ *  fully read by the host depending on card implementation.
+ *
+ * MMC:
+ *  ERASE: Does TRIM, applies erase operation to write blocks instead of Erase Group.
+ *
+ *  DISCARD: The Discard function allows the host to identify data that is no
+ *  longer required so that the device can erase the data if necessary during
+ *  background erase events. Applies to write blocks instead of Erase Group
+ *  After discard operation, the original data may be remained partially or
+ *  fully accessible to the host dependent on device.
+ *
+ */
+typedef enum {
+    SDMMC_ERASE_ARG = 0,      /*!< Erase operation on SD, Trim operation on MMC */
+    SDMMC_DISCARD_ARG = 1,    /*!< Discard operation for SD/MMC */
+} sdmmc_erase_arg_t;
 
 #endif // _SDMMC_TYPES_H_

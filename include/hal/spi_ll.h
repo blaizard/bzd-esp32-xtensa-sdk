@@ -1,40 +1,47 @@
-// Copyright 2015-2019 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * SPDX-FileCopyrightText: 2015-2022 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 /*******************************************************************************
  * NOTICE
  * The hal is not public api, don't use in application code.
- * See readme.md in soc/include/hal/readme.md
+ * See readme.md in hal/include/hal/readme.md
  ******************************************************************************/
 
 // The LL layer for ESP32 SPI register operations
 
 #pragma once
 
-#include "hal/hal_defs.h"
-#include "soc/spi_periph.h"
-#include "esp32/rom/lldesc.h"
 #include <string.h>
-#include <esp_types.h>
 #include <stdlib.h> //for abs()
+#include "esp_types.h"
+#include "esp32/rom/lldesc.h"
+#include "soc/spi_periph.h"
+#include "soc/spi_struct.h"
+#include "hal/misc.h"
+#include "hal/spi_types.h"
+#include "hal/assert.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /// Registers to reset during initialization. Don't use in app.
-#define SPI_LL_RST_MASK (SPI_OUT_RST | SPI_IN_RST | SPI_AHBM_RST | SPI_AHBM_FIFO_RST)
+#define SPI_LL_DMA_FIFO_RST_MASK (SPI_AHBM_RST | SPI_AHBM_FIFO_RST)
 /// Interrupt not used. Don't use in app.
 #define SPI_LL_UNUSED_INT_MASK  (SPI_INT_EN | SPI_SLV_WR_STA_DONE | SPI_SLV_RD_STA_DONE | SPI_SLV_WR_BUF_DONE | SPI_SLV_RD_BUF_DONE)
+/// These 2 masks together will set SPI transaction to one line mode
+#define SPI_LL_ONE_LINE_CTRL_MASK (SPI_FREAD_DUAL | SPI_FREAD_QUAD | SPI_FREAD_DIO | SPI_FREAD_QIO)
+#define SPI_LL_ONE_LINE_USER_MASK (SPI_FWRITE_DUAL | SPI_FWRITE_QUAD | SPI_FWRITE_DIO | SPI_FWRITE_QIO)
 /// Swap the bit order to its correct place to send
-#define HAL_SPI_SWAP_DATA_TX(data, len) HAL_SWAP32((uint32_t)data<<(32-len))
+#define HAL_SPI_SWAP_DATA_TX(data, len) HAL_SWAP32((uint32_t)(data) << (32 - len))
+/// This is the expected clock frequency
+#define SPI_LL_PERIPH_CLK_FREQ (80 * 1000000)
+#define SPI_LL_GET_HW(ID) ((ID)==0? &SPI1:((ID)==1? &SPI2 : &SPI3))
+
+#define SPI_LL_DATA_MAX_BIT_LEN (1 << 24)
 
 /**
  * The data structure holding calculated clock configuration. Since the
@@ -43,14 +50,8 @@
  */
 typedef uint32_t spi_ll_clock_val_t;
 
-/** IO modes supported by the master. */
-typedef enum {
-    SPI_LL_IO_MODE_NORMAL = 0,  ///< 1-bit mode for all phases
-    SPI_LL_IO_MODE_DIO,         ///< 2-bit mode for address and data phases, 1-bit mode for command phase
-    SPI_LL_IO_MODE_DUAL,        ///< 2-bit mode for data phases only, 1-bit mode for command and address phases
-    SPI_LL_IO_MODE_QIO,         ///< 4-bit mode for address and data phases, 1-bit mode for command phase
-    SPI_LL_IO_MODE_QUAD,        ///< 4-bit mode for data phases only, 1-bit mode for command and address phases
-} spi_ll_io_mode_t;
+//On ESP32-S2 and earlier chips, DMA registers are part of SPI registers. So set the registers of SPI peripheral to control DMA.
+typedef spi_dev_t spi_dma_dev_t;
 
 /*------------------------------------------------------------------------------
  * Control
@@ -62,11 +63,6 @@ typedef enum {
  */
 static inline void spi_ll_master_init(spi_dev_t *hw)
 {
-    //Reset DMA
-    hw->dma_conf.val |= SPI_LL_RST_MASK;
-    hw->dma_out_link.start = 0;
-    hw->dma_in_link.start = 0;
-    hw->dma_conf.val &= ~SPI_LL_RST_MASK;
     //Reset timing
     hw->ctrl2.val = 0;
 
@@ -93,10 +89,6 @@ static inline void spi_ll_slave_init(spi_dev_t *hw)
     hw->user.doutdin = 1; //we only support full duplex
     hw->user.sio = 0;
     hw->slave.slave_mode = 1;
-    hw->dma_conf.val |= SPI_LL_RST_MASK;
-    hw->dma_out_link.start = 0;
-    hw->dma_in_link.start = 0;
-    hw->dma_conf.val &= ~SPI_LL_RST_MASK;
     hw->slave.sync_reset = 1;
     hw->slave.sync_reset = 0;
     //use all 64 bytes of the buffer
@@ -105,84 +97,6 @@ static inline void spi_ll_slave_init(spi_dev_t *hw)
 
     //Disable unneeded ints
     hw->slave.val &= ~SPI_LL_UNUSED_INT_MASK;
-}
-
-/**
- * Reset TX and RX DMAs.
- *
- * @param hw Beginning address of the peripheral registers.
- */
-static inline void spi_ll_reset_dma(spi_dev_t *hw)
-{
-    //Reset DMA peripheral
-    hw->dma_conf.val |= SPI_LL_RST_MASK;
-    hw->dma_out_link.start = 0;
-    hw->dma_in_link.start = 0;
-    hw->dma_conf.val &= ~SPI_LL_RST_MASK;
-    hw->dma_conf.out_data_burst_en = 1;
-    hw->dma_conf.indscr_burst_en = 1;
-    hw->dma_conf.outdscr_burst_en = 1;
-}
-
-/**
- * Start RX DMA.
- *
- * @param hw Beginning address of the peripheral registers.
- * @param addr Address of the beginning DMA descriptor.
- */
-static inline void spi_ll_rxdma_start(spi_dev_t *hw, lldesc_t *addr)
-{
-    hw->dma_in_link.addr = (int) addr & 0xFFFFF;
-    hw->dma_in_link.start = 1;
-}
-
-/**
- * Start TX DMA.
- *
- * @param hw Beginning address of the peripheral registers.
- * @param addr Address of the beginning DMA descriptor.
- */
-static inline void spi_ll_txdma_start(spi_dev_t *hw, lldesc_t *addr)
-{
-    hw->dma_out_link.addr = (int) addr & 0xFFFFF;
-    hw->dma_out_link.start = 1;
-}
-
-/**
- * Write to SPI buffer.
- *
- * @param hw Beginning address of the peripheral registers.
- * @param buffer_to_send Data address to copy to the buffer.
- * @param bitlen Length to copy, in bits.
- */
-static inline void spi_ll_write_buffer(spi_dev_t *hw, const uint8_t *buffer_to_send, size_t bitlen)
-{
-    for (int x = 0; x < bitlen; x += 32) {
-        //Use memcpy to get around alignment issues for txdata
-        uint32_t word;
-        memcpy(&word, &buffer_to_send[x / 8], 4);
-        hw->data_buf[(x / 32)] = word;
-    }
-}
-
-/**
- * Read from SPI buffer.
- *
- * @param hw Beginning address of the peripheral registers.
- * @param buffer_to_rcv Address to copy buffer data to.
- * @param bitlen Length to copy, in bits.
- */
-static inline void spi_ll_read_buffer(spi_dev_t *hw, uint8_t *buffer_to_rcv, size_t bitlen)
-{
-    for (int x = 0; x < bitlen; x += 32) {
-        //Do a memcpy to get around possible alignment issues in rx_buffer
-        uint32_t word = hw->data_buf[x / 32];
-        int len = bitlen - x;
-        if (len > 32) {
-            len = 32;
-        }
-        memcpy(&buffer_to_rcv[x / 8], &word, (len + 7) / 8);
-    }
 }
 
 /**
@@ -198,11 +112,21 @@ static inline bool spi_ll_usr_is_done(spi_dev_t *hw)
 }
 
 /**
- * Trigger start of user-defined transaction.
+ * Trigger start of user-defined transaction for master.
  *
  * @param hw Beginning address of the peripheral registers.
  */
-static inline void spi_ll_user_start(spi_dev_t *hw)
+static inline void spi_ll_master_user_start(spi_dev_t *hw)
+{
+    hw->cmd.usr = 1;
+}
+
+/**
+ * Trigger start of user-defined transaction for slave.
+ *
+ * @param hw Beginning address of the peripheral registers.
+ */
+static inline void spi_ll_slave_user_start(spi_dev_t *hw)
 {
     hw->cmd.usr = 1;
 }
@@ -220,45 +144,147 @@ static inline uint32_t spi_ll_get_running_cmd(spi_dev_t *hw)
 }
 
 /**
- * Disable the trans_done interrupt.
+ * Reset SPI CPU TX FIFO
  *
  * @param hw Beginning address of the peripheral registers.
  */
-static inline void spi_ll_disable_int(spi_dev_t *hw)
+static inline void spi_ll_cpu_tx_fifo_reset(spi_dev_t *hw)
 {
-    hw->slave.trans_inten = 0;
+    //This is not used in esp32
 }
 
 /**
- * Clear the trans_done interrupt.
+ * Reset SPI DMA FIFO
  *
  * @param hw Beginning address of the peripheral registers.
  */
-static inline void spi_ll_clear_int_stat(spi_dev_t *hw)
+static inline void spi_ll_cpu_rx_fifo_reset(spi_dev_t *hw)
 {
-    hw->slave.trans_done = 0;
+    //This is not used in esp32
 }
 
 /**
- * Set the trans_done interrupt.
+ * Reset SPI DMA TX FIFO
+ *
+ * On ESP32, this function is not seperated
  *
  * @param hw Beginning address of the peripheral registers.
  */
-static inline void spi_ll_set_int_stat(spi_dev_t *hw)
+static inline void spi_ll_dma_tx_fifo_reset(spi_dev_t *hw)
 {
-    hw->slave.trans_done = 1;
+    hw->dma_conf.val |= SPI_LL_DMA_FIFO_RST_MASK;
+    hw->dma_conf.val &= ~SPI_LL_DMA_FIFO_RST_MASK;
 }
 
 /**
- * Enable the trans_done interrupt.
+ * Reset SPI DMA RX FIFO
+ *
+ * On ESP32, this function is not seperated
  *
  * @param hw Beginning address of the peripheral registers.
  */
-static inline void spi_ll_enable_int(spi_dev_t *hw)
+static inline void spi_ll_dma_rx_fifo_reset(spi_dev_t *hw)
 {
-    hw->slave.trans_inten = 1;
+    hw->dma_conf.val |= SPI_LL_DMA_FIFO_RST_MASK;
+    hw->dma_conf.val &= ~SPI_LL_DMA_FIFO_RST_MASK;
 }
 
+/**
+ * Clear in fifo full error
+ *
+ * @param hw Beginning address of the peripheral registers.
+ */
+static inline void spi_ll_infifo_full_clr(spi_dev_t *hw)
+{
+    //This is not used in esp32
+}
+
+/**
+ * Clear out fifo empty error
+ *
+ * @param hw Beginning address of the peripheral registers.
+ */
+static inline void spi_ll_outfifo_empty_clr(spi_dev_t *hw)
+{
+    //This is not used in esp32
+}
+
+/*------------------------------------------------------------------------------
+ * SPI configuration for DMA
+ *----------------------------------------------------------------------------*/
+
+/**
+ * Enable/Disable RX DMA (Peripherals->DMA->RAM)
+ *
+ * @param hw     Beginning address of the peripheral registers.
+ * @param enable 1: enable; 2: disable
+ */
+static inline void spi_ll_dma_rx_enable(spi_dev_t *hw, bool enable)
+{
+    //This is not used in esp32
+}
+
+/**
+ * Enable/Disable TX DMA (RAM->DMA->Peripherals)
+ *
+ * @param hw     Beginning address of the peripheral registers.
+ * @param enable 1: enable; 2: disable
+ */
+static inline void spi_ll_dma_tx_enable(spi_dev_t *hw, bool enable)
+{
+    //This is not used in esp32
+}
+
+/**
+ * Configuration of RX DMA EOF interrupt generation way
+ *
+ * @param hw     Beginning address of the peripheral registers.
+ * @param enable 1: spi_dma_inlink_eof is set when the number of dma pushed data bytes is equal to the value of spi_slv/mst_dma_rd_bytelen[19:0] in spi dma transition.  0: spi_dma_inlink_eof is set by spi_trans_done in non-seg-trans or spi_dma_seg_trans_done in seg-trans.
+ */
+static inline void spi_ll_dma_set_rx_eof_generation(spi_dev_t *hw, bool enable)
+{
+    //This is not used in esp32
+}
+
+/*------------------------------------------------------------------------------
+ * Buffer
+ *----------------------------------------------------------------------------*/
+/**
+ * Write to SPI buffer.
+ *
+ * @param hw Beginning address of the peripheral registers.
+ * @param buffer_to_send Data address to copy to the buffer.
+ * @param bitlen Length to copy, in bits.
+ */
+static inline void spi_ll_write_buffer(spi_dev_t *hw, const uint8_t *buffer_to_send, size_t bitlen)
+{
+    for (size_t x = 0; x < bitlen; x += 32) {
+        //Use memcpy to get around alignment issues for txdata
+        uint32_t word;
+        memcpy(&word, &buffer_to_send[x / 8], 4);
+        hw->data_buf[(x / 32)] = word;
+    }
+}
+
+/**
+ * Read from SPI buffer.
+ *
+ * @param hw Beginning address of the peripheral registers.
+ * @param buffer_to_rcv Address to copy buffer data to.
+ * @param bitlen Length to copy, in bits.
+ */
+static inline void spi_ll_read_buffer(spi_dev_t *hw, uint8_t *buffer_to_rcv, size_t bitlen)
+{
+    for (size_t x = 0; x < bitlen; x += 32) {
+        //Do a memcpy to get around possible alignment issues in rx_buffer
+        uint32_t word = hw->data_buf[x / 32];
+        int len = bitlen - x;
+        if (len > 32) {
+            len = 32;
+        }
+        memcpy(&buffer_to_rcv[x / 8], &word, (len + 7) / 8);
+    }
+}
 
 /*------------------------------------------------------------------------------
  * Configs: mode
@@ -275,7 +301,7 @@ static inline void spi_ll_master_set_pos_cs(spi_dev_t *hw, int cs, uint32_t pos_
     if (pos_cs) {
         hw->pin.master_cs_pol |= (1 << cs);
     } else {
-        hw->pin.master_cs_pol &= (1 << cs);
+        hw->pin.master_cs_pol &= ~(1 << cs);
     }
 }
 
@@ -413,37 +439,50 @@ static inline void spi_ll_set_sio_mode(spi_dev_t *hw, int sio_mode)
 }
 
 /**
- * Configure the io mode for the master to work at.
+ * Configure the SPI transaction line mode for the master to use.
  *
- * @param hw Beginning address of the peripheral registers.
- * @param io_mode IO mode to work at, see ``spi_ll_io_mode_t``.
+ * @param hw        Beginning address of the peripheral registers.
+ * @param line_mode SPI transaction line mode to use, see ``spi_line_mode_t``.
  */
-static inline void spi_ll_master_set_io_mode(spi_dev_t *hw, spi_ll_io_mode_t io_mode)
+static inline void spi_ll_master_set_line_mode(spi_dev_t *hw, spi_line_mode_t line_mode)
 {
-    hw->ctrl.val &= ~(SPI_FREAD_DUAL | SPI_FREAD_QUAD | SPI_FREAD_DIO | SPI_FREAD_QIO);
-    hw->user.val &= ~(SPI_FWRITE_DUAL | SPI_FWRITE_QUAD | SPI_FWRITE_DIO | SPI_FWRITE_QIO);
-    switch (io_mode) {
-    case SPI_LL_IO_MODE_DIO:
-        hw->ctrl.fread_dio = 1;
-        hw->user.fwrite_dio = 1;
+    hw->ctrl.val &= ~SPI_LL_ONE_LINE_CTRL_MASK;
+    hw->user.val &= ~SPI_LL_ONE_LINE_USER_MASK;
+    if (line_mode.cmd_lines > 1) {
+        HAL_ASSERT(false);
+    }
+    switch (line_mode.data_lines) {
+    case 2:
+        if (line_mode.addr_lines == 1) {
+            // 1-line-cmd + 1-line-addr + 2-line-data
+            hw->ctrl.fread_dual = 1;
+            hw->user.fwrite_dual = 1;
+        } else if (line_mode.addr_lines == 2) {
+            // 1-line-cmd + 2-line-addr + 2-line-data
+            hw->ctrl.fread_dio = 1;
+            hw->user.fwrite_dio = 1;
+        } else {
+            HAL_ASSERT(false);
+        }
+        hw->ctrl.fastrd_mode = 1;
         break;
-    case SPI_LL_IO_MODE_DUAL:
-        hw->ctrl.fread_dual = 1;
-        hw->user.fwrite_dual = 1;
-        break;
-    case SPI_LL_IO_MODE_QIO:
-        hw->ctrl.fread_qio = 1;
-        hw->user.fwrite_qio = 1;
-        break;
-    case SPI_LL_IO_MODE_QUAD:
-        hw->ctrl.fread_quad = 1;
-        hw->user.fwrite_quad = 1;
+    case 4:
+        if (line_mode.addr_lines == 1) {
+            // 1-line-cmd + 1-line-addr + 4-line-data
+            hw->ctrl.fread_quad = 1;
+            hw->user.fwrite_quad = 1;
+        } else if (line_mode.addr_lines == 4) {
+            // 1-line-cmd + 4-line-addr + 4-line-data
+            hw->ctrl.fread_qio = 1;
+            hw->user.fwrite_qio = 1;
+        } else {
+            HAL_ASSERT(false);
+        }
+        hw->ctrl.fastrd_mode = 1;
         break;
     default:
+        // 1-line-cmd + 1-line-addr + 1-line-data
         break;
-    };
-    if (io_mode != SPI_LL_IO_MODE_NORMAL) {
-        hw->ctrl.fastrd_mode = 1;
     }
 }
 
@@ -460,6 +499,17 @@ static inline void spi_ll_master_select_cs(spi_dev_t *hw, int cs_id)
     hw->pin.cs2_dis = (cs_id == 2) ? 0 : 1;
 }
 
+/**
+ * Keep Chip Select activated after the current transaction.
+ *
+ * @param hw Beginning address of the peripheral registers.
+ * @param keep_active if 0 don't keep CS activated, else keep CS activated
+ */
+static inline void spi_ll_master_keep_cs(spi_dev_t *hw, int keep_active)
+{
+    hw->pin.cs_keep_active = (keep_active != 0) ? 1 : 0;
+}
+
 /*------------------------------------------------------------------------------
  * Configs: parameters
  *----------------------------------------------------------------------------*/
@@ -469,7 +519,7 @@ static inline void spi_ll_master_select_cs(spi_dev_t *hw, int cs_id)
  * @param hw Beginning address of the peripheral registers.
  * @param val stored clock configuration calculated before (by ``spi_ll_cal_clock``).
  */
-static inline void spi_ll_master_set_clock_by_reg(spi_dev_t *hw, spi_ll_clock_val_t *val)
+static inline void spi_ll_master_set_clock_by_reg(spi_dev_t *hw, const spi_ll_clock_val_t *val)
 {
     hw->clock.val = *(uint32_t *)val;
 }
@@ -599,7 +649,7 @@ static inline void spi_ll_master_set_cksel(spi_dev_t *hw, int cs, uint32_t cksel
     if (cksel) {
         hw->pin.master_ck_sel |= (1 << cs);
     } else {
-        hw->pin.master_ck_sel &= (1 << cs);
+        hw->pin.master_ck_sel &= ~(1 << cs);
     }
 }
 
@@ -645,7 +695,7 @@ static inline void spi_ll_set_miso_delay(spi_dev_t *hw, int delay_mode, int dela
 static inline void spi_ll_set_dummy(spi_dev_t *hw, int dummy_n)
 {
     hw->user.usr_dummy = dummy_n ? 1 : 0;
-    hw->user1.usr_dummy_cyclelen = dummy_n - 1;
+    HAL_FORCE_MODIFY_U32_REG_FIELD(hw->user1, usr_dummy_cyclelen, dummy_n - 1);
 }
 
 /**
@@ -708,7 +758,7 @@ static inline void spi_ll_set_mosi_bitlen(spi_dev_t *hw, size_t bitlen)
  */
 static inline void spi_ll_slave_set_rx_bitlen(spi_dev_t *hw, size_t bitlen)
 {
-    hw->slv_wrbuf_dlen.bit_len = bitlen - 1;
+    hw->slv_rdbuf_dlen.bit_len = bitlen - 1;
 }
 
 /**
@@ -719,7 +769,7 @@ static inline void spi_ll_slave_set_rx_bitlen(spi_dev_t *hw, size_t bitlen)
  */
 static inline void spi_ll_slave_set_tx_bitlen(spi_dev_t *hw, size_t bitlen)
 {
-    hw->slv_rdbuf_dlen.bit_len = bitlen - 1;
+    hw->slv_wrbuf_dlen.bit_len = bitlen - 1;
 }
 
 /**
@@ -803,13 +853,13 @@ static inline void spi_ll_set_command(spi_dev_t *hw, uint16_t cmd, int cmdlen, b
 {
     if (lsbfirst) {
         // The output command start from bit0 to bit 15, kept as is.
-        hw->user2.usr_command_value = cmd;
+        HAL_FORCE_MODIFY_U32_REG_FIELD(hw->user2, usr_command_value, cmd);
     } else {
         /* Output command will be sent from bit 7 to 0 of command_value, and
          * then bit 15 to 8 of the same register field. Shift and swap to send
          * more straightly.
          */
-        hw->user2.usr_command_value = HAL_SPI_SWAP_DATA_TX(cmd, cmdlen);
+        HAL_FORCE_MODIFY_U32_REG_FIELD(hw->user2, usr_command_value, HAL_SPI_SWAP_DATA_TX(cmd, cmdlen));
 
     }
 }
@@ -859,6 +909,181 @@ static inline uint32_t spi_ll_slave_get_rcv_bitlen(spi_dev_t *hw)
     return hw->slv_rd_bit.slv_rdata_bit;
 }
 
+/*------------------------------------------------------------------------------
+ * Interrupts
+ *----------------------------------------------------------------------------*/
+/**
+ * Disable the trans_done interrupt.
+ *
+ * @param hw Beginning address of the peripheral registers.
+ */
+static inline void spi_ll_disable_int(spi_dev_t *hw)
+{
+    hw->slave.trans_inten = 0;
+}
+
+/**
+ * Clear the trans_done interrupt.
+ *
+ * @param hw Beginning address of the peripheral registers.
+ */
+static inline void spi_ll_clear_int_stat(spi_dev_t *hw)
+{
+    hw->slave.trans_done = 0;
+}
+
+/**
+ * Set the trans_done interrupt.
+ *
+ * @param hw Beginning address of the peripheral registers.
+ */
+static inline void spi_ll_set_int_stat(spi_dev_t *hw)
+{
+    hw->slave.trans_done = 1;
+}
+
+/**
+ * Enable the trans_done interrupt.
+ *
+ * @param hw Beginning address of the peripheral registers.
+ */
+static inline void spi_ll_enable_int(spi_dev_t *hw)
+{
+    hw->slave.trans_inten = 1;
+}
+
+/*------------------------------------------------------------------------------
+ * DMA:
+ *      RX DMA (Peripherals->DMA->RAM)
+ *      TX DMA (RAM->DMA->Peripherals)
+ *----------------------------------------------------------------------------*/
+/**
+ * Reset RX DMA which stores the data received from a peripheral into RAM.
+ *
+ * @param dma_in  Beginning address of the DMA peripheral registers which stores the data received from a peripheral into RAM.
+ * @param channel DMA channel, for chip version compatibility, not used.
+ */
+static inline void spi_dma_ll_rx_reset(spi_dma_dev_t *dma_in, uint32_t channel)
+{
+    //Reset RX DMA peripheral
+    dma_in->dma_conf.in_rst = 1;
+    dma_in->dma_conf.in_rst = 0;
+}
+
+/**
+ * Start RX DMA.
+ *
+ * @param dma_in  Beginning address of the DMA peripheral registers which stores the data received from a peripheral into RAM.
+ * @param channel DMA channel, for chip version compatibility, not used.
+ * @param addr    Address of the beginning DMA descriptor.
+ */
+static inline void spi_dma_ll_rx_start(spi_dma_dev_t *dma_in, uint32_t channel, lldesc_t *addr)
+{
+    dma_in->dma_in_link.addr = (int) addr & 0xFFFFF;
+    dma_in->dma_in_link.start = 1;
+}
+
+/**
+ * Enable DMA RX channel burst for data
+ *
+ * @param dma_in  Beginning address of the DMA peripheral registers which stores the data received from a peripheral into RAM.
+ * @param channel DMA channel, for chip version compatibility, not used.
+ * @param enable  True to enable, false to disable
+ */
+static inline void spi_dma_ll_rx_enable_burst_data(spi_dma_dev_t *dma_in, uint32_t channel, bool enable)
+{
+    //This is not supported in esp32
+}
+
+/**
+ * Enable DMA RX channel burst for descriptor
+ *
+ * @param dma_in  Beginning address of the DMA peripheral registers which stores the data received from a peripheral into RAM.
+ * @param channel DMA channel, for chip version compatibility, not used.
+ * @param enable  True to enable, false to disable
+ */
+static inline void spi_dma_ll_rx_enable_burst_desc(spi_dma_dev_t *dma_in, uint32_t channel, bool enable)
+{
+    dma_in->dma_conf.indscr_burst_en = enable;
+}
+
+/**
+ * Reset TX DMA which transmits the data from RAM to a peripheral.
+ *
+ * @param dma_out Beginning address of the DMA peripheral registers which transmits the data from RAM to a peripheral.
+ * @param channel DMA channel, for chip version compatibility, not used.
+ */
+static inline void spi_dma_ll_tx_reset(spi_dma_dev_t *dma_out, uint32_t channel)
+{
+    //Reset TX DMA peripheral
+    dma_out->dma_conf.out_rst = 1;
+    dma_out->dma_conf.out_rst = 0;
+}
+
+/**
+ * Start TX DMA.
+ *
+ * @param dma_out Beginning address of the DMA peripheral registers which transmits the data from RAM to a peripheral.
+ * @param channel DMA channel, for chip version compatibility, not used.
+ * @param addr    Address of the beginning DMA descriptor.
+ */
+static inline void spi_dma_ll_tx_start(spi_dma_dev_t *dma_out, uint32_t channel, lldesc_t *addr)
+{
+    dma_out->dma_out_link.addr = (int) addr & 0xFFFFF;
+    dma_out->dma_out_link.start = 1;
+}
+
+/**
+ * Enable DMA TX channel burst for data
+ *
+ * @param dma_out Beginning address of the DMA peripheral registers which transmits the data from RAM to a peripheral.
+ * @param channel DMA channel, for chip version compatibility, not used.
+ * @param enable  True to enable, false to disable
+ */
+static inline void spi_dma_ll_tx_enable_burst_data(spi_dma_dev_t *dma_out, uint32_t channel, bool enable)
+{
+    dma_out->dma_conf.out_data_burst_en = enable;
+}
+
+/**
+ * Enable DMA TX channel burst for descriptor
+ *
+ * @param dma_out Beginning address of the DMA peripheral registers which transmits the data from RAM to a peripheral.
+ * @param channel DMA channel, for chip version compatibility, not used.
+ * @param enable  True to enable, false to disable
+ */
+static inline void spi_dma_ll_tx_enable_burst_desc(spi_dma_dev_t *dma_out, uint32_t channel, bool enable)
+{
+    dma_out->dma_conf.outdscr_burst_en = enable;
+}
+
+/**
+ * Configuration of OUT EOF flag generation way
+ *
+ * @param dma_out Beginning address of the DMA peripheral registers which transmits the data from RAM to a peripheral.
+ * @param channel DMA channel, for chip version compatibility, not used.
+ * @param enable  1: when dma pop all data from fifo  0:when ahb push all data to fifo.
+ */
+static inline void spi_dma_ll_set_out_eof_generation(spi_dma_dev_t *dma_out, uint32_t channel, bool enable)
+{
+    dma_out->dma_conf.out_eof_mode = enable;
+}
+
+/**
+ * Enable automatic outlink-writeback
+ *
+ * @param dma_out Beginning address of the DMA peripheral registers which transmits the data from RAM to a peripheral.
+ * @param channel DMA channel, for chip version compatibility, not used.
+ * @param enable  True to enable, false to disable
+ */
+static inline void spi_dma_ll_enable_out_auto_wrback(spi_dma_dev_t *dma_out, uint32_t channel, bool enable)
+{
+    //does not configure it in ESP32
+}
 
 #undef SPI_LL_RST_MASK
 #undef SPI_LL_UNUSED_INT_MASK
+
+#ifdef __cplusplus
+}
+#endif

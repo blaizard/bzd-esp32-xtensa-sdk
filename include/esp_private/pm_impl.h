@@ -26,6 +26,9 @@
 #include "esp_timer.h"
 #include "sdkconfig.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /**
  * This is an enum of possible power modes supported by the implementation
@@ -45,6 +48,13 @@ typedef enum {
  * @return lowest power consumption mode which meets the constraints of the lock
  */
 pm_mode_t esp_pm_impl_get_mode(esp_pm_lock_type_t type, int arg);
+
+/**
+ * @brief Get CPU clock frequency by power mode
+ * @param mode power mode
+ * @return CPU clock frequency
+ */
+int esp_pm_impl_get_cpu_freq(pm_mode_t mode);
 
 /**
  * If profiling is enabled, this data type will be used to store microsecond
@@ -80,19 +90,19 @@ void esp_pm_impl_switch_mode(pm_mode_t mode, pm_mode_switch_t lock_or_unlock, pm
 /**
  * @brief Call once at startup to initialize pm implementation
  */
-void esp_pm_impl_init();
+void esp_pm_impl_init(void);
 
 /**
  * @brief Hook function for the idle task
  * Must be called from the IDLE task on each CPU before entering waiti state.
  */
-void esp_pm_impl_idle_hook();
+void esp_pm_impl_idle_hook(void);
 
 /**
  * @brief Hook function for the interrupt dispatcher
  * Must be called soon after entering the ISR
  */
-void esp_pm_impl_isr_hook();
+void esp_pm_impl_isr_hook(void);
 
 /**
  * @brief Dump the information about time spent in each of the pm modes.
@@ -107,15 +117,101 @@ void esp_pm_impl_dump_stats(FILE* out);
 /**
  * @brief Hook function implementing `waiti` instruction, should be invoked from idle task context
  */
-void esp_pm_impl_waiti();
+void esp_pm_impl_waiti(void);
+
+/**
+ * @brief Callback function type for peripherals to skip light sleep.
+ *
+ */
+typedef bool (* skip_light_sleep_cb_t)(void);
+
+/**
+  * @brief  Register peripherals skip light sleep callback
+  *
+  * This function allows you to register a callback that gets the result
+  * that if light sleep should be skipped by peripherals.
+  * @param cb function to get the result
+  * @return
+  *   - ESP_OK on success
+  *   - ESP_ERR_NO_MEM if no more callback slots are available
+  */
+esp_err_t esp_pm_register_skip_light_sleep_callback(skip_light_sleep_cb_t cb);
+
+/**
+  * @brief  Unregisterperipherals skip light sleep callback
+  *
+  * This function allows you to unregister a callback which was previously
+  * registered using esp_register_skip_light_sleep_callback.
+  * @param cb function to get the result
+  * @return
+  *   - ESP_OK on success
+  *   - ESP_ERR_INVALID_STATE if the given callback hasn't been registered before
+  */
+esp_err_t esp_pm_unregister_skip_light_sleep_callback(skip_light_sleep_cb_t cb);
+
+/**
+ * @brief Callback function type for peripherals to know light sleep wakeup overhead.
+ *
+ */
+typedef void (* inform_out_light_sleep_overhead_cb_t)(uint32_t);
+
+/**
+  * @brief  Register informing peripherals light sleep wakeup overhead time callback
+  *
+  * This function allows you to register a callback that informs the peripherals of
+  * the wakeup overhead time of light sleep.
+  * @param cb function to inform time
+  * @return
+  *   - ESP_OK on success
+  *   - ESP_ERR_NO_MEM if no more callback slots are available
+  */
+esp_err_t esp_pm_register_inform_out_light_sleep_overhead_callback(inform_out_light_sleep_overhead_cb_t cb);
+
+/**
+  * @brief  Unregister informing peripherals light sleep wakeup overhead time callback
+  *
+  * This function allows you to unregister a callback that informs the peripherals of
+  * the wakeup overhead time of light sleep.
+  * @param cb function to inform time
+  * @return
+  *   - ESP_OK on success
+  *   - ESP_ERR_INVALID_STATE if the given callback hasn't been registered before
+  */
+esp_err_t esp_pm_unregister_inform_out_light_sleep_overhead_callback(inform_out_light_sleep_overhead_cb_t cb);
+
+/**
+ * @brief Callback function type for peripherals to know light sleep default parameters
+ */
+typedef void (* update_light_sleep_default_params_config_cb_t)(int, int);
+
+/**
+ * @brief  Register peripherals light sleep default parameters configure callback
+ *
+ * This function allows you to register a callback that configure the peripherals
+ * of default parameters of light sleep
+ * @param cb function to update default parameters
+ */
+void esp_pm_register_light_sleep_default_params_config_callback(update_light_sleep_default_params_config_cb_t cb);
+
+/**
+ * @brief  Unregister peripherals light sleep default parameters configure Callback
+ *
+ * This function allows you to unregister a callback that configure the peripherals
+ * of default parameters of light sleep
+ */
+void esp_pm_unregister_light_sleep_default_params_config_callback(void);
 
 #ifdef CONFIG_PM_PROFILING
 #define WITH_PROFILING
 #endif
 
 #ifdef WITH_PROFILING
-static inline pm_time_t IRAM_ATTR pm_get_time()
+static inline pm_time_t IRAM_ATTR pm_get_time(void)
 {
     return esp_timer_get_time();
 }
 #endif // WITH_PROFILING
+
+#ifdef __cplusplus
+}
+#endif
