@@ -4,46 +4,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef __ESP_ADC_CAL_H__
-#define __ESP_ADC_CAL_H__
+#pragma once
 
 #include <stdint.h>
+#include "sdkconfig.h"
 #include "esp_err.h"
-#include "driver/adc.h"
+#include "hal/adc_types.h"
+#include "driver/adc_types_legacy.h"
+#include "esp_adc_cal_types_legacy.h"
+
+#if !CONFIG_ADC_SUPPRESS_DEPRECATE_WARN
+#warning "legacy adc calibration driver is deprecated, please migrate to use esp_adc/adc_cali.h and esp_adc/adc_cali_scheme.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/**
- * @brief Type of calibration value used in characterization
- */
-typedef enum {
-    ESP_ADC_CAL_VAL_EFUSE_VREF = 0,         /**< Characterization based on reference voltage stored in eFuse*/
-    ESP_ADC_CAL_VAL_EFUSE_TP = 1,           /**< Characterization based on Two Point values stored in eFuse*/
-    ESP_ADC_CAL_VAL_DEFAULT_VREF = 2,       /**< Characterization based on default reference voltage*/
-    ESP_ADC_CAL_VAL_EFUSE_TP_FIT = 3,       /**< Characterization based on Two Point values and fitting curve coefficients stored in eFuse */
-    ESP_ADC_CAL_VAL_MAX,
-    ESP_ADC_CAL_VAL_NOT_SUPPORTED = ESP_ADC_CAL_VAL_MAX,
-} esp_adc_cal_value_t;
-
-/**
- * @brief Structure storing characteristics of an ADC
- *
- * @note Call esp_adc_cal_characterize() to initialize the structure
- */
-typedef struct {
-    adc_unit_t adc_num;                     /**< ADC unit*/
-    adc_atten_t atten;                      /**< ADC attenuation*/
-    adc_bits_width_t bit_width;             /**< ADC bit width */
-    uint32_t coeff_a;                       /**< Gradient of ADC-Voltage curve*/
-    uint32_t coeff_b;                       /**< Offset of ADC-Voltage curve*/
-    uint32_t vref;                          /**< Vref used by lookup table*/
-    const uint32_t *low_curve;              /**< Pointer to low Vref curve of lookup table (NULL if unused)*/
-    const uint32_t *high_curve;             /**< Pointer to high Vref curve of lookup table (NULL if unused)*/
-    uint8_t version;                        /**< ADC Calibration */
-} esp_adc_cal_characteristics_t;
-
+#if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32S3
 /**
  * @brief Checks if ADC calibration values are burned into eFuse
  *
@@ -128,8 +106,8 @@ uint32_t esp_adc_cal_raw_to_voltage(uint32_t adc_reading, const esp_adc_cal_char
  */
 esp_err_t esp_adc_cal_get_voltage(adc_channel_t channel, const esp_adc_cal_characteristics_t *chars, uint32_t *voltage);
 
+#endif  //#if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32S3
+
 #ifdef __cplusplus
 }
 #endif
-
-#endif /* __ESP_ADC_CAL_H__ */

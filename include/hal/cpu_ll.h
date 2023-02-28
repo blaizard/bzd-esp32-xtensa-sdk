@@ -3,186 +3,161 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+
 #pragma once
 
+/*
+Note: This is a compatibility header. Call the interfaces in esp_cpu.h instead
+*/
+
 #include <stdint.h>
-
-#include "esp_attr.h"
-
+#include <stdbool.h>
 #include "soc/soc_caps.h"
-
-#include "xt_instr_macros.h"
-#include "xtensa/config/specreg.h"
-#include "xtensa/config/extreg.h"
-#include "esp_bit_defs.h"
-#include "xtensa/config/core.h"
+#include "esp_attr.h"
+#include "esp_cpu.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-static inline uint32_t IRAM_ATTR cpu_ll_get_core_id(void)
+FORCE_INLINE_ATTR __attribute__((deprecated)) __attribute__((pure)) uint32_t cpu_ll_get_core_id(void)
 {
-    uint32_t id;
-    asm volatile (
-        "rsr.prid %0\n"
-        "extui %0,%0,13,1"
-        :"=r"(id));
-    return id;
+    return esp_cpu_get_core_id();
 }
 
-static inline uint32_t IRAM_ATTR cpu_ll_get_cycle_count(void)
+FORCE_INLINE_ATTR __attribute__((deprecated)) uint32_t cpu_ll_get_cycle_count(void)
 {
-    uint32_t result;
-    RSR(CCOUNT, result);
-    return result;
+    return (uint32_t)esp_cpu_get_cycle_count();
 }
 
-static inline void IRAM_ATTR cpu_ll_set_cycle_count(uint32_t val)
+FORCE_INLINE_ATTR __attribute__((deprecated)) void cpu_ll_set_cycle_count(uint32_t val)
 {
-    WSR(CCOUNT, val);
+    esp_cpu_set_cycle_count((esp_cpu_cycle_count_t)val);
 }
 
-static inline void* cpu_ll_get_sp(void)
+FORCE_INLINE_ATTR __attribute__((deprecated)) void *cpu_ll_get_sp(void)
 {
-    void *sp;
-    asm volatile ("mov %0, sp;" : "=r" (sp));
-    return sp;
+    return esp_cpu_get_sp();
 }
 
-static inline void cpu_ll_init_hwloop(void)
+FORCE_INLINE_ATTR __attribute__((deprecated)) void cpu_ll_init_hwloop(void)
 {
-#if XCHAL_ERRATUM_572
-    uint32_t memctl = XCHAL_CACHE_MEMCTL_DEFAULT;
-    WSR(MEMCTL, memctl);
-#endif // XCHAL_ERRATUM_572
+    ;   // Nothing to do. Contents moved to bootloader directly
 }
 
-static inline void cpu_ll_set_breakpoint(int id, uint32_t pc)
+#if SOC_CPU_BREAKPOINTS_NUM > 0
+FORCE_INLINE_ATTR __attribute__((deprecated)) void cpu_ll_set_breakpoint(int id, uint32_t pc)
 {
-    uint32_t en;
-
-    // Set the break address register to the appropriate PC
-    if (id) {
-        WSR(IBREAKA_1, pc);
-    } else {
-        WSR(IBREAKA_0, pc);
-    }
-
-    // Enable the breakpoint using the break enable register
-    RSR(IBREAKENABLE, en);
-    en |= BIT(id);
-    WSR(IBREAKENABLE, en);
+    esp_cpu_set_breakpoint(id, (const void *)pc);
 }
 
-static inline void cpu_ll_clear_breakpoint(int id)
+FORCE_INLINE_ATTR __attribute__((deprecated)) void cpu_ll_clear_breakpoint(int id)
 {
-    uint32_t en = 0;
-    uint32_t pc = 0;
-
-    // Set the break address register to the appropriate PC
-    if (id) {
-        WSR(IBREAKA_1, pc);
-    } else {
-        WSR(IBREAKA_0, pc);
-    }
-
-    // Enable the breakpoint using the break enable register
-    RSR(IBREAKENABLE, en);
-    en &= ~BIT(id);
-    WSR(IBREAKENABLE, en);
+    esp_cpu_clear_breakpoint(id);
 }
+#endif // SOC_CPU_BREAKPOINTS_NUM > 0
 
-static inline uint32_t cpu_ll_ptr_to_pc(const void* addr)
+FORCE_INLINE_ATTR __attribute__((deprecated)) __attribute__((pure)) uint32_t cpu_ll_ptr_to_pc(const void *addr)
 {
     return ((uint32_t) addr);
 }
 
-static inline void* cpu_ll_pc_to_ptr(uint32_t pc)
+FORCE_INLINE_ATTR __attribute__((deprecated)) __attribute__((pure)) void *cpu_ll_pc_to_ptr(uint32_t pc)
 {
-    return (void*) ((pc & 0x3fffffffU) | 0x40000000U);
+    return esp_cpu_pc_to_addr(pc);
 }
 
-static inline void cpu_ll_set_watchpoint(int id,
-                                        const void* addr,
-                                        size_t size,
-                                        bool on_read,
-                                        bool on_write)
+
+FORCE_INLINE_ATTR __attribute__((deprecated))
+void cpu_ll_set_watchpoint(int id, const void *addr, size_t size, bool on_read, bool on_write)
 {
-    uint32_t dbreakc = 0x3F;
-
-    //We support watching 2^n byte values, from 1 to 64. Calculate the mask for that.
-    for (int x = 0; x < 7; x++) {
-        if (size == (size_t)(1U << x)) {
-            break;
-        }
-        dbreakc <<= 1;
-    }
-
-    dbreakc = (dbreakc & 0x3F);
-
-    if (on_read) {
-        dbreakc |= BIT(30);
-    }
-
-    if (on_write) {
-        dbreakc |= BIT(31);
-    }
-
-    // Write the break address register and the size to control
-    // register.
-    if (id) {
-        WSR(DBREAKA_1, (uint32_t) addr);
-        WSR(DBREAKC_1, dbreakc);
+    esp_cpu_watchpoint_trigger_t trigger;
+    if (on_read && on_write) {
+        trigger = ESP_CPU_WATCHPOINT_ACCESS;
+    } else if (on_read) {
+        trigger = ESP_CPU_WATCHPOINT_LOAD;
     } else {
-        WSR(DBREAKA_0, (uint32_t) addr);
-        WSR(DBREAKC_0, dbreakc);
+        trigger = ESP_CPU_WATCHPOINT_STORE;
     }
+    esp_cpu_set_watchpoint(id, addr, size, trigger);
 }
 
-static inline void cpu_ll_clear_watchpoint(int id)
+FORCE_INLINE_ATTR __attribute__((deprecated)) void cpu_ll_clear_watchpoint(int id)
 {
-    // Clear both break address register and control register
-    if (id) {
-        WSR(DBREAKA_1, 0);
-        WSR(DBREAKC_1, 0);
-    } else {
-        WSR(DBREAKA_0, 0);
-        WSR(DBREAKC_0, 0);
-    }
+    esp_cpu_clear_watchpoint(id);
 }
 
-static inline bool cpu_ll_is_debugger_attached(void)
+FORCE_INLINE_ATTR __attribute__((deprecated)) bool cpu_ll_is_debugger_attached(void)
 {
-    uint32_t dcr = 0;
-    uint32_t reg = DSRSET;
-    RER(reg, dcr);
-    return (dcr&0x1);
+    return esp_cpu_dbgr_is_attached();
 }
 
-static inline void cpu_ll_break(void)
+FORCE_INLINE_ATTR __attribute__((deprecated)) void cpu_ll_break(void)
 {
-    __asm__ ("break 1,15");
+    esp_cpu_dbgr_break();
 }
 
-static inline void cpu_ll_set_vecbase(const void* vecbase)
+FORCE_INLINE_ATTR __attribute__((deprecated)) void cpu_ll_set_vecbase(const void *base)
 {
-    asm volatile ("wsr %0, vecbase" :: "r" (vecbase));
+    esp_cpu_intr_set_ivt_addr(base);
 }
 
-static inline void cpu_ll_waiti(void)
+FORCE_INLINE_ATTR __attribute__((deprecated)) void cpu_ll_waiti(void)
 {
-    asm volatile ("waiti 0\n");
+    esp_cpu_wait_for_intr();
 }
 
-static inline void cpu_ll_compare_and_set_native(volatile uint32_t *addr, uint32_t compare, uint32_t *set)
+FORCE_INLINE_ATTR __attribute__((deprecated))
+void cpu_ll_compare_and_set_native(volatile uint32_t *addr, uint32_t compare, uint32_t *set)
 {
+#ifdef __clang_analyzer__
+    //Teach clang-tidy that "addr" and "set" cannot be const as they can both be updated by S32C1I instruction
+    volatile uint32_t temp;
+    temp = *addr;
+    *addr = temp;
+    temp = *set;
+    *set = temp;
+#endif
+#ifdef __XTENSA__
+#if XCHAL_HAVE_S32C1I
     __asm__ __volatile__ (
-        "WSR 	    %2,SCOMPARE1 \n"
-        "S32C1I     %0, %1, 0	 \n"
+        "WSR    %2, SCOMPARE1 \n"
+        "S32C1I %0, %1, 0 \n"
         :"=r"(*set)
         :"r"(addr), "r"(compare), "0"(*set)
     );
+#else // XCHAL_HAVE_S32C1I
+    uint32_t old_value;
+
+    // No S32C1I, so do this by disabling and re-enabling interrupts (slower)
+    uint32_t intlevel;
+    __asm__ __volatile__ ("rsil %0, " XTSTR(XCHAL_EXCM_LEVEL) "\n"
+                          : "=r"(intlevel));
+
+    old_value = *addr;
+    if (old_value == compare) {
+        *addr = *set;
+    }
+
+    __asm__ __volatile__ ("memw \n"
+                          "wsr %0, ps\n"
+                          :: "r"(intlevel));
+
+    *set = old_value;
+#endif // XCHAL_HAVE_S32C1I
+#else
+    uint32_t old_value;
+    unsigned old_mstatus = RV_CLEAR_CSR(mstatus, MSTATUS_MIE);
+
+    old_value = *addr;
+    if (old_value == compare) {
+        *addr = *set;
+    }
+
+    RV_SET_CSR(mstatus, old_mstatus & MSTATUS_MIE);
+
+    *set = old_value;
+#endif
 }
 
 #ifdef __cplusplus

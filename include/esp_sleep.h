@@ -75,7 +75,7 @@ typedef enum {
     ESP_SLEEP_WAKEUP_TIMER,        //!< Wakeup caused by timer
     ESP_SLEEP_WAKEUP_TOUCHPAD,     //!< Wakeup caused by touchpad
     ESP_SLEEP_WAKEUP_ULP,          //!< Wakeup caused by ULP program
-    ESP_SLEEP_WAKEUP_GPIO,         //!< Wakeup caused by GPIO (light sleep only)
+    ESP_SLEEP_WAKEUP_GPIO,         //!< Wakeup caused by GPIO (light sleep only on ESP32, S2 and S3)
     ESP_SLEEP_WAKEUP_UART,         //!< Wakeup caused by UART (light sleep only)
     ESP_SLEEP_WAKEUP_WIFI,              //!< Wakeup caused by WIFI (light sleep only)
     ESP_SLEEP_WAKEUP_COCPU,             //!< Wakeup caused by COCPU int
@@ -85,6 +85,11 @@ typedef enum {
 
 /* Leave this type define for compatibility */
 typedef esp_sleep_source_t esp_sleep_wakeup_cause_t;
+
+enum {
+    ESP_ERR_SLEEP_REJECT = ESP_ERR_INVALID_STATE,
+    ESP_ERR_SLEEP_TOO_SHORT_SLEEP_DURATION = ESP_ERR_INVALID_ARG,
+};
 
 /**
  * @brief Disable wakeup source
@@ -107,10 +112,8 @@ esp_err_t esp_sleep_disable_wakeup_source(esp_sleep_source_t source);
 #if SOC_ULP_SUPPORTED
 /**
  * @brief Enable wakeup by ULP coprocessor
- * @note In revisions 0 and 1 of the ESP32, ULP wakeup source
- *       cannot be used when RTC_PERIPH power domain is forced
- *       to be powered on (ESP_PD_OPTION_ON) or when
- *       ext0 wakeup source is used.
+ * @note On ESP32, ULP wakeup source cannot be used when RTC_PERIPH power domain is forced,
+ *       to be powered on (ESP_PD_OPTION_ON) or when ext0 wakeup source is used.
  * @return
  *      - ESP_OK on success
  *      - ESP_ERR_NOT_SUPPORTED if additional current by touch (CONFIG_RTC_EXT_CRYST_ADDIT_CURRENT) is enabled.
@@ -129,15 +132,12 @@ esp_err_t esp_sleep_enable_ulp_wakeup(void);
  */
 esp_err_t esp_sleep_enable_timer_wakeup(uint64_t time_in_us);
 
-#if SOC_TOUCH_SENSOR_NUM > 0
-
+#if SOC_TOUCH_SENSOR_SUPPORTED
 /**
  * @brief Enable wakeup by touch sensor
  *
- * @note In revisions 0 and 1 of the ESP32, touch wakeup source
- *       can not be used when RTC_PERIPH power domain is forced
- *       to be powered on (ESP_PD_OPTION_ON) or when ext0 wakeup
- *       source is used.
+ * @note On ESP32, touch wakeup source can not be used when RTC_PERIPH power domain is forced
+ *       to be powered on (ESP_PD_OPTION_ON) or when ext0 wakeup source is used.
  *
  * @note The FSM mode of the touch button should be configured
  *       as the timer trigger mode.
@@ -157,8 +157,7 @@ esp_err_t esp_sleep_enable_touchpad_wakeup(void);
  * @return touch pad which caused wakeup
  */
 touch_pad_t esp_sleep_get_touchpad_wakeup_status(void);
-
-#endif // SOC_TOUCH_SENSOR_NUM > 0
+#endif // SOC_TOUCH_SENSOR_SUPPORTED
 
 /**
  * @brief Returns true if a GPIO number is valid for use as wakeup source.
@@ -186,8 +185,7 @@ bool esp_sleep_is_valid_wakeup_gpio(gpio_num_t gpio_num);
  *       configured in esp_deep_sleep_start/esp_light_sleep_start,
  *       immediately before entering sleep mode.
  *
- * @note In revisions 0 and 1 of the ESP32, ext0 wakeup source
- *       can not be used together with touch or ULP wakeup sources.
+ * @note On ESP32, ext0 wakeup source can not be used together with touch or ULP wakeup sources.
  *
  * @param gpio_num  GPIO number used as wakeup source. Only GPIOs which are have RTC
  *             functionality can be used: 0,2,4,12-15,25-27,32-39.
@@ -272,8 +270,7 @@ esp_err_t esp_deep_sleep_enable_gpio_wakeup(uint64_t gpio_pin_mask, esp_deepslee
  * wakeup level, for each GPIO which is used for wakeup.
  * Then call this function to enable wakeup feature.
  *
- * @note In revisions 0 and 1 of the ESP32, GPIO wakeup source
- *       can not be used together with touch or ULP wakeup sources.
+ * @note On ESP32, GPIO wakeup source can not be used together with touch or ULP wakeup sources.
  *
  * @return
  *      - ESP_OK on success
@@ -297,6 +294,22 @@ esp_err_t esp_sleep_enable_gpio_wakeup(void);
  *      - ESP_ERR_INVALID_ARG if wakeup from given UART is not supported
  */
 esp_err_t esp_sleep_enable_uart_wakeup(int uart_num);
+
+/**
+ * @brief Enable wakeup by bluetooth
+ * @return
+ *      - ESP_OK on success
+ *      - ESP_ERR_NOT_SUPPORTED if wakeup from bluetooth is not supported
+ */
+esp_err_t esp_sleep_enable_bt_wakeup(void);
+
+/**
+ * @brief Disable wakeup by bluetooth
+ * @return
+ *      - ESP_OK on success
+ *      - ESP_ERR_NOT_SUPPORTED if wakeup from bluetooth is not supported
+ */
+esp_err_t esp_sleep_disable_bt_wakeup(void);
 
 /**
  * @brief Enable wakeup by WiFi MAC
@@ -344,7 +357,7 @@ uint64_t esp_sleep_get_gpio_wakeup_status(void);
  *      - ESP_ERR_INVALID_ARG if either of the arguments is out of range
  */
 esp_err_t esp_sleep_pd_config(esp_sleep_pd_domain_t domain,
-                                   esp_sleep_pd_option_t option);
+                              esp_sleep_pd_option_t option);
 
 /**
  * @brief Enter deep sleep with the configured wakeup options
@@ -358,7 +371,10 @@ void esp_deep_sleep_start(void) __attribute__((noreturn));
  *
  * @return
  *  - ESP_OK on success (returned after wakeup)
- *  - ESP_ERR_INVALID_STATE if WiFi or BT is not stopped
+ *  - ESP_ERR_SLEEP_REJECT sleep request is rejected(wakeup source set before the sleep request)
+ *  - ESP_ERR_SLEEP_TOO_SHORT_SLEEP_DURATION after deducting the sleep flow overhead, the final sleep duration
+ *                                           is too short to cover the minimum sleep duration of the chip, when
+ *                                           rtc timer wakeup source enabled
  */
 esp_err_t esp_light_sleep_start(void);
 

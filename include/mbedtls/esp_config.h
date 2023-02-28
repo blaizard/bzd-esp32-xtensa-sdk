@@ -137,10 +137,8 @@
 #undef MBEDTLS_AES_ALT
 #endif
 
-#ifdef CONFIG_MBEDTLS_HARDWARE_GCM
+#ifdef CONFIG_MBEDTLS_HARDWARE_AES
 #define MBEDTLS_GCM_ALT
-#else
-#undef MBEDTLS_GCM_ALT
 #endif
 
 /* MBEDTLS_SHAxx_ALT to enable hardware SHA support
@@ -1704,19 +1702,6 @@
 #else
 #undef MBEDTLS_DES_C
 #endif
-
-/**
- * \def MBEDTLS_ARC4_C
- *
- * NOTE: mbedTLS-3.x release has removed support for RC4 cipher-suite.
- * TODO: IDF-4983
- *
- * Following option is kept as there are a few places in the
- * WPA supplicant component in ESP-IDF that relies on this config.
- * This shall be removed once the RC4 cipher-suite support is cleanly
- * removed from WPA supplicant component.
- */
-#undef MBEDTLS_ARC4_C
 
 /**
  * \def MBEDTLS_DHM_C
